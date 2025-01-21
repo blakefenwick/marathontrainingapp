@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-// Version 1.6.9 - Update to Klaviyo's latest API (v2023-02)
+// Version 1.7.0 - Remove subscriptions field from profile creation
 const KLAVIYO_API_KEY = process.env.KLAVIYO_API_KEY;
 const KLAVIYO_LIST_ID = process.env.KLAVIYO_LIST_ID || 'UEyYQh';
 
@@ -31,14 +31,7 @@ async function createOrUpdateProfile(email: string) {
         data: {
           type: 'profile',
           attributes: {
-            email: email,
-            subscriptions: {
-              email: {
-                marketing: {
-                  consent: 'SUBSCRIBED'
-                }
-              }
-            }
+            email: email
           }
         }
       }),
@@ -52,6 +45,7 @@ async function createOrUpdateProfile(email: string) {
         statusText: response.statusText,
         error: responseData
       });
+      console.error('Full response body:', responseData); // Add full response logging
       throw new Error(responseData.errors?.[0]?.detail || 'Error creating/updating profile');
     }
     
