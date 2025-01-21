@@ -222,8 +222,8 @@ export default function MarathonForm() {
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
             required
           />
-          <p className="mt-1 text-sm text-gray-500">
-            During testing, all plans will be sent to blake.fenwick1@gmail.com. Your email will be included in the forwarded plan.
+          <p className="mt-1 text-sm text-white-500">
+            Entering your email subscribes you to Veloci's email list. You can unsubscribe at any time in the future.
           </p>
         </div>
 
