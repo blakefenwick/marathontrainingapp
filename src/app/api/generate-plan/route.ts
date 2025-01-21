@@ -8,8 +8,23 @@ export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-// Version check
-console.log('Running Edge Runtime version - v1.2.5 (Redis Connection Fix)');
+// Version check - v1.2.6 (Environment Variable Validation)
+console.log('Running Edge Runtime version - v1.2.6');
+
+// Validate environment variables
+const requiredEnvVars = {
+  OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+  UPSTASH_REDIS_REST_URL: process.env.UPSTASH_REDIS_REST_URL,
+  UPSTASH_REDIS_REST_TOKEN: process.env.UPSTASH_REDIS_REST_TOKEN,
+  VERCEL_URL: process.env.VERCEL_URL
+};
+
+console.log('Environment Variables Status:', {
+  OPENAI_API_KEY: !!process.env.OPENAI_API_KEY ? 'Set' : 'Missing',
+  UPSTASH_REDIS_REST_URL: process.env.UPSTASH_REDIS_REST_URL ? 'Set' : 'Missing',
+  UPSTASH_REDIS_REST_TOKEN: process.env.UPSTASH_REDIS_REST_TOKEN ? 'Set' : 'Missing',
+  VERCEL_URL: process.env.VERCEL_URL ? 'Set' : 'Missing'
+});
 
 // Define types
 interface PlanState {
