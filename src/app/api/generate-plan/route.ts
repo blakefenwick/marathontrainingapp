@@ -225,24 +225,18 @@ Daily format:
         .map(([_, plan]) => plan)
         .join('\n\n');
 
-      // Construct the email API URL
-      const baseUrl = process.env.VERCEL_URL 
-        ? `https://${process.env.VERCEL_URL}` 
-        : 'https://marathontrainingapp-12125.vercel.app';
-
+      // Construct the email API URL - use relative URL instead of absolute
       console.log('Email sending process started...', {
-        baseUrl,
         recipientEmail: state.email,
         planLength: fullPlan.length,
         raceDate: format(raceDateObj, 'MMMM d, yyyy')
       });
 
       try {
-        const emailUrl = `${baseUrl}/api/send-email`;
-        console.log('Sending email request to:', emailUrl);
+        console.log('Sending email request...');
 
         const emailResponse = await fetch(
-          emailUrl,
+          '/api/send-email',
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -258,11 +252,10 @@ Daily format:
         console.log('Email API response status:', emailResponse.status);
         
         if (!emailResponse.ok) {
-          const errorData = await emailResponse.json();
+          const errorText = await emailResponse.text(); // Use text() instead of json() to see the actual response
           console.error('Failed to send email:', {
             status: emailResponse.status,
-            error: errorData,
-            url: emailUrl,
+            response: errorText,
             recipientEmail: state.email
           });
         } else {
