@@ -109,7 +109,7 @@ export default function MarathonForm() {
             Your Email Address
           </label>
           <p className="text-sm text-gray-300 mb-2">
-            We'll email you your training plan when it's ready. You can also view it here in the app.
+            We&apos;ll email you your training plan when it&apos;s ready. You can also view it here in the app.
           </p>
           <input
             type="email"
@@ -228,7 +228,7 @@ export default function MarathonForm() {
               Generating your training plan...
             </p>
             <p className="text-gray-300 text-sm">
-              We'll email it to {formData.email} when it's ready. You can also view it here in the app.
+              We&apos;ll email it to {formData.email} when it&apos;s ready. You can also view it here in the app.
             </p>
           </div>
         )}
