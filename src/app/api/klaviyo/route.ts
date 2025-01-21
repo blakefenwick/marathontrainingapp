@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-// Version 1.7.2 - Add API key validation and whitespace trimming
+// Version 1.7.3 - Handle existing profiles gracefully
 const KLAVIYO_API_KEY = process.env.KLAVIYO_API_KEY?.trim();
 const KLAVIYO_LIST_ID = process.env.KLAVIYO_LIST_ID?.trim() || 'UEyYQh';
 
@@ -17,8 +17,57 @@ if (!KLAVIYO_LIST_ID) {
   console.log('Using Klaviyo List ID:', KLAVIYO_LIST_ID);
 }
 
+async function getExistingProfile(email: string) {
+  console.log('Checking for existing profile:', email);
+  
+  try {
+    const response = await fetch(`https://a.klaviyo.com/api/profiles/?filter=equals(email,"${email}")`, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
+        'revision': '2023-02-22'
+      }
+    });
+
+    const responseText = await response.text();
+    console.log('Raw response from Klaviyo (get profile):', responseText);
+
+    if (!responseText) {
+      return null;
+    }
+
+    const responseData = JSON.parse(responseText);
+    
+    if (!response.ok) {
+      console.error('Failed to get profile:', {
+        status: response.status,
+        error: responseData
+      });
+      return null;
+    }
+
+    if (responseData.data && responseData.data.length > 0) {
+      console.log('Found existing profile:', responseData.data[0].id);
+      return responseData.data[0].id;
+    }
+
+    return null;
+  } catch (error) {
+    console.error('Error checking for existing profile:', error);
+    return null;
+  }
+}
+
 async function createOrUpdateProfile(email: string) {
-  console.log('Creating/updating Klaviyo profile:', email);
+  // First check if profile exists
+  const existingProfileId = await getExistingProfile(email);
+  if (existingProfileId) {
+    console.log('Using existing profile:', existingProfileId);
+    return existingProfileId;
+  }
+
+  console.log('Creating new Klaviyo profile:', email);
 
   try {
     const payload = {
@@ -60,15 +109,15 @@ async function createOrUpdateProfile(email: string) {
     }
 
     if (!response.ok) {
-      console.error('Failed to create/update profile:', {
+      console.error('Failed to create profile:', {
         status: response.status,
         headers: Object.fromEntries(response.headers.entries()),
         error: responseData
       });
-      throw new Error(responseData.errors?.[0]?.detail || 'Error creating/updating profile');
+      throw new Error(responseData.errors?.[0]?.detail || 'Error creating profile');
     }
 
-    console.log('Profile created/updated successfully:', responseData);
+    console.log('Profile created successfully:', responseData);
     return responseData.data.id;
   } catch (error) {
     console.error('Error in createOrUpdateProfile:', error);
