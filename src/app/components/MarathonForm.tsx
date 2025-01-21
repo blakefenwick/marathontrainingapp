@@ -98,6 +98,24 @@ export default function MarathonForm() {
     setTotalWeeks(0);
     
     try {
+      // Subscribe to Klaviyo
+      console.log('Subscribing to Klaviyo...');
+      const klaviyoResponse = await fetch('/api/klaviyo', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email: formData.email }),
+      });
+
+      if (!klaviyoResponse.ok) {
+        const klaviyoError = await klaviyoResponse.json();
+        console.error('Klaviyo subscription error:', klaviyoError);
+        // Continue with plan generation even if Klaviyo fails
+      } else {
+        console.log('Successfully subscribed to Klaviyo');
+      }
+
       // Initialize plan
       const response = await fetch('/api/generate-plan', {
         method: 'POST',
