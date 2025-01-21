@@ -1,5 +1,6 @@
 'use client';
 
+// Version 1.0.1 - Email-based plan generation with progress tracking
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import TrainingPlan from './TrainingPlan';
@@ -89,12 +90,16 @@ export default function MarathonForm() {
           <label htmlFor="email" className="block text-sm font-medium text-white">
             Your Email Address
           </label>
+          <p className="text-sm text-gray-300 mb-2">
+            We'll email you your training plan when it's ready. You can also view it here in the app.
+          </p>
           <input
             type="email"
             id="email"
+            placeholder="you@example.com"
             value={formData.email}
             onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-black"
+            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-black p-2"
             required
           />
         </div>
@@ -108,7 +113,7 @@ export default function MarathonForm() {
             id="raceDate"
             value={formData.raceDate}
             onChange={(e) => setFormData({ ...formData, raceDate: e.target.value })}
-            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-black"
+            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-black p-2"
             required
           />
         </div>
@@ -129,7 +134,7 @@ export default function MarathonForm() {
                   ...formData,
                   goalTime: { ...formData.goalTime, hours: e.target.value }
                 })}
-                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-black"
+                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-black p-2"
                 required
               />
             </div>
@@ -144,7 +149,7 @@ export default function MarathonForm() {
                   ...formData,
                   goalTime: { ...formData.goalTime, minutes: e.target.value }
                 })}
-                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-black"
+                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-black p-2"
                 required
               />
             </div>
@@ -159,7 +164,7 @@ export default function MarathonForm() {
                   ...formData,
                   goalTime: { ...formData.goalTime, seconds: e.target.value }
                 })}
-                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-black"
+                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-black p-2"
                 required
               />
             </div>
@@ -177,7 +182,7 @@ export default function MarathonForm() {
             step="0.1"
             value={formData.currentMileage}
             onChange={(e) => setFormData({ ...formData, currentMileage: e.target.value })}
-            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-black"
+            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-black p-2"
             required
           />
         </div>
@@ -197,9 +202,14 @@ export default function MarathonForm() {
         )}
 
         {status === 'processing' && (
-          <p className="text-green-500 text-sm text-center mt-2">
-            Generating your training plan... You'll receive an email when it's ready.
-          </p>
+          <div className="text-center mt-4">
+            <p className="text-green-500 text-sm mb-2">
+              Generating your training plan...
+            </p>
+            <p className="text-gray-300 text-sm">
+              We'll email it to {formData.email} when it's ready. You can also view it here in the app.
+            </p>
+          </div>
         )}
       </form>
 
