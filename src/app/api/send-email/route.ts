@@ -1,36 +1,25 @@
 import { NextResponse } from 'next/server';
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 
-// Use Node.js runtime instead of Edge
-export const runtime = 'nodejs';
+// Use Edge runtime for better compatibility
+export const runtime = 'edge';
 
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
+if (!process.env.RESEND_API_KEY) {
+  throw new Error('Missing RESEND_API_KEY environment variable');
+}
+
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function POST(req: Request) {
   try {
     console.log('Starting email send request...');
     
-    // Verify transporter
-    try {
-      await transporter.verify();
-      console.log('Email transporter verified');
-    } catch (verifyError) {
-      console.error('Email transporter verification failed:', verifyError);
-      throw new Error('Failed to verify email configuration');
-    }
-
     const { email, subject, plan, raceDate } = await req.json();
     console.log('Received email request for:', email);
 
     try {
-      await transporter.sendMail({
-        from: process.env.EMAIL_USER,
+      const data = await resend.emails.send({
+        from: 'Marathon Training Plan <onboarding@resend.dev>',
         to: email,
         subject: subject,
         html: `
@@ -46,8 +35,8 @@ export async function POST(req: Request) {
           </div>
         `
       });
-      console.log('Email sent successfully');
-      
+
+      console.log('Email sent successfully:', data);
       return NextResponse.json({ success: true });
     } catch (sendError) {
       console.error('Failed to send email:', sendError);

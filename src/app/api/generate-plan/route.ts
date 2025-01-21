@@ -16,14 +16,16 @@ const requiredEnvVars = {
   OPENAI_API_KEY: process.env.OPENAI_API_KEY,
   UPSTASH_REDIS_REST_URL: process.env.UPSTASH_REDIS_REST_URL,
   UPSTASH_REDIS_REST_TOKEN: process.env.UPSTASH_REDIS_REST_TOKEN,
-  VERCEL_URL: process.env.VERCEL_URL
+  VERCEL_URL: process.env.VERCEL_URL,
+  RESEND_API_KEY: process.env.RESEND_API_KEY
 };
 
 console.log('Environment Variables Status:', {
   OPENAI_API_KEY: !!process.env.OPENAI_API_KEY ? 'Set' : 'Missing',
   UPSTASH_REDIS_REST_URL: process.env.UPSTASH_REDIS_REST_URL ? 'Set' : 'Missing',
   UPSTASH_REDIS_REST_TOKEN: process.env.UPSTASH_REDIS_REST_TOKEN ? 'Set' : 'Missing',
-  VERCEL_URL: process.env.VERCEL_URL ? 'Set' : 'Missing'
+  VERCEL_URL: process.env.VERCEL_URL ? 'Set' : 'Missing',
+  RESEND_API_KEY: process.env.RESEND_API_KEY ? 'Set' : 'Missing'
 });
 
 // Define types
