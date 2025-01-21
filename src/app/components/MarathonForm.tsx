@@ -47,7 +47,8 @@ export default function MarathonForm() {
 
         // If we're in progress and not currently generating a week, start the next one
         if (data.status === 'in_progress' && data.currentWeek < data.totalWeeks) {
-          const nextWeek = (data.currentWeek || 0) + 1;
+          const nextWeek = data.currentWeek + 1;
+          console.log('Starting week', nextWeek, 'generation...');
           try {
             const weekResponse = await fetch('/api/generate-plan', {
               method: 'PUT',
@@ -96,6 +97,7 @@ export default function MarathonForm() {
     setTotalWeeks(0);
     
     try {
+      // Initialize plan
       const response = await fetch('/api/generate-plan', {
         method: 'POST',
         headers: {
@@ -113,6 +115,26 @@ export default function MarathonForm() {
       setRequestId(data.requestId);
       setTotalWeeks(data.totalWeeks);
       setStatus('initialized');
+
+      // Immediately start generating the first week
+      console.log('Starting week 1 generation...');
+      const weekResponse = await fetch('/api/generate-plan', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          requestId: data.requestId, 
+          weekNumber: 1 
+        })
+      });
+
+      if (!weekResponse.ok) {
+        const weekErrorData = await weekResponse.json();
+        throw new Error(weekErrorData.error || 'Failed to generate first week');
+      }
+
+      const weekData = await weekResponse.json();
+      setWeeks({ 1: weekData.weekPlan });
+      setCurrentWeek(1);
       
     } catch (error) {
       console.error('Form submission error:', error);
