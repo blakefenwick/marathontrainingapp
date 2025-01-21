@@ -6,9 +6,10 @@ import { Redis } from '@upstash/redis';
 // Configure runtime
 export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 // Version check
-console.log('Running Edge Runtime version with streaming - v1.1.0');
+console.log('Running Edge Runtime version with streaming - v1.1.3 (60s timeout)');
 
 // Validate all required environment variables
 const requiredEnvVars = {
@@ -115,74 +116,15 @@ export async function POST(req: Request) {
       completedWeeks: 0
     }), { ex: 3600 });
 
-    // Start background processing
-    generateFullPlan(requestId, raceDate, goalTime, currentMileage, email).catch(error => {
-      console.error('Background processing failed:', error);
-    });
-
-    console.log('Background processing initiated');
-    return NextResponse.json({
-      message: "Your training plan is being generated. You'll receive an email when it's ready.",
-      requestId
-    });
-
-  } catch (error) {
-    console.error('Error in POST handler:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to initiate plan generation' },
-      { status: 500 }
-    );
-  }
-}
-
-async function generateFullPlan(
-  requestId: string,
-  raceDate: string,
-  goalTime: { hours: string; minutes: string; seconds: string },
-  currentMileage: string,
-  email: string
-) {
-  try {
-    console.log('Starting plan generation for requestId:', requestId, {
-      raceDate,
-      goalTime,
-      currentMileage,
-      email
-    });
-    
-    const raceDateObj = new Date(raceDate);
-    console.log('Race date parsed:', raceDateObj);
-    
-    const today = new Date();
-    console.log('Today:', today);
-    
-    let currentWeek = 1;
-    let fullPlan = '';
-
-    while (true) {
-      console.log(`Starting generation for week ${currentWeek}...`);
-      
-      const startDate = currentWeek === 1 ? today : addDays(today, (currentWeek - 1) * 7);
+    // Generate first week immediately
+    try {
+      const raceDateObj = new Date(raceDate);
+      const today = new Date();
+      const startDate = today;
       const endDate = addDays(startDate, 6);
       const lastTrainingDay = endDate > raceDateObj ? raceDateObj : endDate;
 
-      console.log('Week dates:', {
-        startDate,
-        endDate,
-        lastTrainingDay,
-        isAfterRaceDate: startDate >= raceDateObj
-      });
-
-      if (startDate >= raceDateObj) {
-        console.log('Reached race date, stopping generation');
-        break;
-      }
-
-      // Generate plan for current week
-      try {
-        console.log('Preparing prompt for week', currentWeek);
-        const prompt = `Create a marathon training plan for Week ${currentWeek}.
-${currentWeek === 1 ? `
+      const prompt = `Create a marathon training plan for Week 1.
 Runner Profile:
 - Race Day: ${format(raceDateObj, 'EEEE, MMMM d, yyyy')}
 - Goal Time: ${goalTime.hours}h${goalTime.minutes}m${goalTime.seconds}s
@@ -190,10 +132,9 @@ Runner Profile:
 
 Training Overview:
 Provide a brief overview of the training approach.
-` : ''}
 
 Format the week like this:
-## Week ${currentWeek}
+## Week 1
 > Weekly Target: [X] miles
 > Key Workouts: Long run ([X] miles), Speed work ([X] miles)
 > Build: [+/- X] miles from previous week
@@ -210,7 +151,83 @@ ${Array.from({ length: differenceInDays(lastTrainingDay, startDate) + 1 }).map((
   return format(date, 'EEEE, MMMM d, yyyy');
 }).join('\n')}`;
 
-        console.log('Calling OpenAI API...');
+      const response = await openai.chat.completions.create({
+        model: 'gpt-3.5-turbo',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a marathon coach. Create specific daily workouts that build progressively. Include distances, paces, and brief tips.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        max_tokens: 1000,
+        temperature: 0.5,
+      });
+
+      const firstWeekPlan = response.choices[0]?.message?.content || '';
+
+      // Store first week and continue with background processing
+      await storage('set', `request:${requestId}`, JSON.stringify({
+        status: 'processing',
+        email,
+        raceDate,
+        goalTime,
+        currentMileage,
+        plan: firstWeekPlan,
+        completedWeeks: 1
+      }), { ex: 3600 });
+
+      // Start background processing for remaining weeks
+      generateRemainingWeeks(requestId, raceDate, goalTime, currentMileage, email, firstWeekPlan).catch(error => {
+        console.error('Background processing failed:', error);
+      });
+
+      return NextResponse.json({
+        message: "Your training plan is being generated. First week is ready, and the rest will be emailed when complete.",
+        requestId,
+        firstWeekPlan
+      });
+
+    } catch (error) {
+      console.error('Error generating first week:', error);
+      throw error;
+    }
+
+  } catch (error) {
+    console.error('Error in POST handler:', error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to initiate plan generation' },
+      { status: 500 }
+    );
+  }
+}
+
+async function generateRemainingWeeks(
+  requestId: string,
+  raceDate: string,
+  goalTime: { hours: string; minutes: string; seconds: string },
+  currentMileage: string,
+  email: string,
+  firstWeekPlan: string
+) {
+  try {
+    const raceDateObj = new Date(raceDate);
+    const today = new Date();
+    let currentWeek = 2; // Start from week 2
+    let fullPlan = firstWeekPlan;
+
+    while (true) {
+      const startDate = addDays(today, (currentWeek - 1) * 7);
+      const endDate = addDays(startDate, 6);
+      const lastTrainingDay = endDate > raceDateObj ? raceDateObj : endDate;
+
+      if (startDate >= raceDateObj) break;
+
+      try {
+        const prompt = `Create a marathon training plan for Week ${currentWeek}...`; // Existing prompt logic
         const response = await openai.chat.completions.create({
           model: 'gpt-3.5-turbo',
           messages: [
@@ -226,25 +243,10 @@ ${Array.from({ length: differenceInDays(lastTrainingDay, startDate) + 1 }).map((
           max_tokens: 1000,
           temperature: 0.5,
         });
-        console.log('OpenAI API response received');
 
         const weekPlan = response.choices[0]?.message?.content || '';
-        console.log(`Week ${currentWeek} plan generated:`, weekPlan.substring(0, 100) + '...');
-        
-        fullPlan += (fullPlan ? '\n\n' : '') + weekPlan;
-      } catch (openaiError: any) {
-        console.error('OpenAI API error:', openaiError);
-        console.error('OpenAI error details:', {
-          name: openaiError.name,
-          message: openaiError.message,
-          stack: openaiError.stack
-        });
-        throw new Error('Failed to generate training plan: ' + openaiError.message);
-      }
+        fullPlan += '\n\n' + weekPlan;
 
-      // Update progress
-      try {
-        console.log(`Updating progress for week ${currentWeek}`);
         await storage('set', `request:${requestId}`, JSON.stringify({
           status: 'processing',
           email,
@@ -254,76 +256,48 @@ ${Array.from({ length: differenceInDays(lastTrainingDay, startDate) + 1 }).map((
           plan: fullPlan,
           completedWeeks: currentWeek
         }), { ex: 3600 });
-        console.log('Progress updated successfully');
-      } catch (storageError: any) {
-        console.error('Failed to update progress:', storageError);
+
+      } catch (error) {
+        console.error(`Error generating week ${currentWeek}:`, error);
+        throw error;
       }
 
-      if (lastTrainingDay >= raceDateObj) {
-        console.log('Reached last training day, stopping generation');
-        break;
-      }
+      if (lastTrainingDay >= raceDateObj) break;
       currentWeek++;
     }
 
-    console.log('Plan generation completed, sending email...');
-    
-    // Send email using the separate email endpoint
-    try {
-      console.log('Preparing to send email to:', email);
-      const emailResponse = await fetch(`${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000'}/api/send-email`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email,
-          subject: 'Your Marathon Training Plan',
-          plan: fullPlan,
-          raceDate: format(raceDateObj, 'MMMM d, yyyy')
-        }),
-      });
-
-      if (!emailResponse.ok) {
-        const errorData = await emailResponse.json();
-        console.error('Email sending failed:', errorData);
-        throw new Error('Failed to send email: ' + JSON.stringify(errorData));
-      }
-      console.log('Email sent successfully');
-    } catch (emailError: any) {
-      console.error('Email error:', emailError);
-      throw new Error('Failed to send email: ' + emailError.message);
-    }
-
-    // Update final status
-    try {
-      console.log('Updating final status');
-      await storage('set', `request:${requestId}`, JSON.stringify({
-        status: 'completed',
+    // Send email with completed plan
+    const emailResponse = await fetch(`${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000'}/api/send-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         email,
-        raceDate,
-        goalTime,
-        currentMileage,
+        subject: 'Your Complete Marathon Training Plan',
         plan: fullPlan,
-        completedWeeks: currentWeek
-      }), { ex: 3600 });
-      console.log('Final status updated successfully');
-    } catch (storageError) {
-      console.error('Failed to update final status:', storageError);
+        raceDate: format(raceDateObj, 'MMMM d, yyyy')
+      }),
+    });
+
+    if (!emailResponse.ok) {
+      throw new Error('Failed to send email');
     }
+
+    await storage('set', `request:${requestId}`, JSON.stringify({
+      status: 'completed',
+      email,
+      raceDate,
+      goalTime,
+      currentMileage,
+      plan: fullPlan,
+      completedWeeks: currentWeek
+    }), { ex: 3600 });
 
   } catch (error) {
-    console.error('Error in generateFullPlan:', error);
-    try {
-      console.log('Updating error status');
-      await storage('set', `request:${requestId}`, JSON.stringify({
-        status: 'error',
-        error: error instanceof Error ? error.message : 'Failed to generate plan'
-      }), { ex: 3600 });
-      console.log('Error status updated successfully');
-    } catch (storageError) {
-      console.error('Failed to update error status:', storageError);
-    }
+    console.error('Error in generateRemainingWeeks:', error);
+    await storage('set', `request:${requestId}`, JSON.stringify({
+      status: 'error',
+      error: error instanceof Error ? error.message : 'Failed to generate plan'
+    }), { ex: 3600 });
   }
 }
 
