@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 // Version check
-console.log('Running Edge Runtime version - v1.2.0 (Chunked Generation)');
+console.log('Running Edge Runtime version - v1.2.5 (Redis Connection Fix)');
 
 // Define types
 interface PlanState {
@@ -34,11 +34,29 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || '',
 });
 
-// Initialize Redis client
-const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL || '',
-  token: process.env.UPSTASH_REDIS_REST_TOKEN || '',
-});
+// Initialize Redis client with explicit error handling
+function initializeRedis() {
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+
+  if (!url || !token) {
+    console.error('Redis credentials missing:', {
+      hasUrl: !!url,
+      hasToken: !!token
+    });
+    throw new Error('Redis credentials not configured');
+  }
+
+  console.log('Initializing Redis with URL:', url.substring(0, 20) + '...');
+  
+  return new Redis({
+    url,
+    token,
+    automaticDeserialization: false  // Handle JSON manually for better error control
+  });
+}
+
+const redis = initializeRedis();
 
 // Calculate total weeks between dates
 function calculateTotalWeeks(startDate: Date, raceDate: Date): number {
@@ -254,16 +272,67 @@ ${Array.from({ length: differenceInDays(lastTrainingDay, startDate) + 1 }).map((
   }
 }
 
-// Add Redis connection check
+// Update connection check
 async function checkRedisConnection() {
   try {
-    const testKey = 'test-connection';
-    await redis.set(testKey, 'test-value', { ex: 60 });
-    const testValue = await redis.get(testKey);
+    console.log('Testing Redis connection...');
+    
+    // Test 1: Basic set/get
+    const testKey = `test-connection-${Date.now()}`;
+    const testValue = `test-value-${Date.now()}`;
+    
+    console.log('Test 1: Setting test value...');
+    await redis.set(testKey, testValue, { ex: 60 });
+    
+    console.log('Test 1: Getting test value...');
+    const retrievedValue = await redis.get(testKey);
+    
+    console.log('Test 1: Cleaning up...');
     await redis.del(testKey);
-    return testValue === 'test-value';
+    
+    if (retrievedValue !== testValue) {
+      console.error('Redis value mismatch:', {
+        expected: testValue,
+        received: retrievedValue
+      });
+      return false;
+    }
+
+    // Test 2: JSON handling
+    const jsonKey = `test-json-${Date.now()}`;
+    const jsonValue = {
+      test: true,
+      timestamp: Date.now()
+    };
+
+    console.log('Test 2: Setting JSON value...');
+    await redis.set(jsonKey, JSON.stringify(jsonValue), { ex: 60 });
+
+    console.log('Test 2: Getting JSON value...');
+    const retrievedJson = await redis.get(jsonKey);
+
+    console.log('Test 2: Cleaning up...');
+    await redis.del(jsonKey);
+
+    if (!retrievedJson || typeof retrievedJson !== 'string') {
+      console.error('Redis JSON test failed:', {
+        received: retrievedJson,
+        type: typeof retrievedJson
+      });
+      return false;
+    }
+
+    try {
+      JSON.parse(retrievedJson);
+    } catch (e) {
+      console.error('Failed to parse JSON from Redis:', e);
+      return false;
+    }
+
+    console.log('All Redis tests passed successfully');
+    return true;
   } catch (error) {
-    console.error('Redis connection test failed:', error);
+    console.error('Redis connection test failed with error:', error);
     return false;
   }
 }
