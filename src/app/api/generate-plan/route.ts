@@ -1,6 +1,7 @@
 import { OpenAI } from 'openai';
 import { NextResponse } from 'next/server';
 import { differenceInDays, addDays, format } from 'date-fns';
+import { Redis } from '@upstash/redis';
 
 // Configure runtime
 export const runtime = 'edge';
@@ -13,31 +14,91 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+// Initialize Redis client
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL!,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+});
+
 export async function POST(req: Request) {
-  // Create a TransformStream for streaming the response
-  const encoder = new TextEncoder();
-  const stream = new TransformStream();
-  const writer = stream.writable.getWriter();
+  try {
+    const { raceDate, goalTime, currentMileage } = await req.json();
+    
+    // Generate a unique ID for this request
+    const requestId = crypto.randomUUID();
+    
+    // Store initial status in Redis
+    await redis.set(requestId, JSON.stringify({
+      status: 'processing',
+      progress: 0,
+      plan: ''
+    }), { ex: 3600 }); // Expire after 1 hour
 
-  // Start processing in the background
-  (async () => {
-    try {
-      const { raceDate, goalTime, currentMileage, startDate } = await req.json();
+    // Start plan generation in the background
+    generatePlanInBackground(requestId, raceDate, goalTime, currentMileage);
 
-      // Send initial response to prevent timeout
-      await writer.write(encoder.encode('Generating your training plan...\n\n'));
+    // Return immediately with the request ID
+    return NextResponse.json({ 
+      requestId,
+      message: 'Plan generation started',
+      status: 'processing'
+    });
 
-      // Calculate dates
-      const today = startDate ? new Date(startDate) : new Date();
-      const raceDateObj = new Date(raceDate);
-      const totalDays = differenceInDays(raceDateObj, today);
-      
-      // Generate plan for next 7 days only (reduced from 14 for faster response)
-      const endDate = addDays(today, 6);
+  } catch (error) {
+    console.error('Error initiating plan generation:', error);
+    return NextResponse.json(
+      { error: 'Failed to start plan generation' },
+      { status: 500 }
+    );
+  }
+}
+
+// New endpoint to check status
+export async function GET(req: Request) {
+  try {
+    const url = new URL(req.url);
+    const requestId = url.searchParams.get('requestId');
+
+    if (!requestId) {
+      return NextResponse.json(
+        { error: 'No requestId provided' },
+        { status: 400 }
+      );
+    }
+
+    const planData = await redis.get<string>(requestId);
+    if (!planData) {
+      return NextResponse.json(
+        { error: 'Plan not found' },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json(JSON.parse(planData));
+
+  } catch (error) {
+    console.error('Error checking plan status:', error);
+    return NextResponse.json(
+      { error: 'Failed to check plan status' },
+      { status: 500 }
+    );
+  }
+}
+
+async function generatePlanInBackground(requestId: string, raceDate: string, goalTime: any, currentMileage: string) {
+  try {
+    const today = new Date();
+    const raceDateObj = new Date(raceDate);
+    const totalDays = differenceInDays(raceDateObj, today);
+    let currentDate = today;
+    let weekNumber = 1;
+    let fullPlan = '';
+
+    // Generate plan week by week
+    while (currentDate < raceDateObj) {
+      const endDate = addDays(currentDate, 6);
       const lastTrainingDay = endDate > raceDateObj ? raceDateObj : endDate;
-      const weekNumber = Math.floor(differenceInDays(today, new Date()) / 7) + 1;
 
-      // Create optimized prompt
       const prompt = `Create a marathon training plan for the following 7 days.
 ${weekNumber === 1 ? `
 Runner Profile:
@@ -62,12 +123,11 @@ Pace: [Specific pace]
 Notes: [Brief tips]
 
 Generate the plan for these dates:
-${Array.from({ length: differenceInDays(lastTrainingDay, today) + 1 }).map((_, i) => {
-  const date = addDays(today, i);
+${Array.from({ length: differenceInDays(lastTrainingDay, currentDate) + 1 }).map((_, i) => {
+  const date = addDays(currentDate, i);
   return format(date, 'EEEE, MMMM d, yyyy');
 }).join('\n')}`;
 
-      // Make API call with reduced tokens and temperature
       const response = await openai.chat.completions.create({
         model: 'gpt-3.5-turbo',
         messages: [
@@ -82,36 +142,37 @@ ${Array.from({ length: differenceInDays(lastTrainingDay, today) + 1 }).map((_, i
         ],
         max_tokens: 1000,
         temperature: 0.5,
-        stream: true,
       });
 
-      // Stream the response
-      for await (const chunk of response) {
-        const text = chunk.choices[0]?.delta?.content || '';
-        if (text) {
-          await writer.write(encoder.encode(text));
-        }
-      }
+      const weekPlan = response.choices[0]?.message?.content || '';
+      fullPlan += (weekNumber > 1 ? '\n\n' : '') + weekPlan;
 
-      // Send metadata at the end
-      await writer.write(encoder.encode('\n\n__METADATA__' + JSON.stringify({
-        hasMore: lastTrainingDay < raceDateObj,
-        nextDate: addDays(lastTrainingDay, 1).toISOString()
-      })));
+      // Update progress in Redis
+      const progress = Math.min(100, Math.round((differenceInDays(lastTrainingDay, today) / totalDays) * 100));
+      await redis.set(requestId, JSON.stringify({
+        status: 'processing',
+        progress,
+        plan: fullPlan
+      }), { ex: 3600 }); // Expire after 1 hour
 
-    } catch (error) {
-      console.error('Error generating plan:', error);
-      await writer.write(encoder.encode('Error: Failed to generate training plan'));
-    } finally {
-      await writer.close();
+      // Move to next week
+      currentDate = addDays(lastTrainingDay, 1);
+      weekNumber++;
     }
-  })();
 
-  // Return the stream immediately
-  return new Response(stream.readable, {
-    headers: {
-      'Content-Type': 'text/plain; charset=utf-8',
-      'Transfer-Encoding': 'chunked',
-    },
-  });
+    // Mark as complete in Redis
+    await redis.set(requestId, JSON.stringify({
+      status: 'complete',
+      progress: 100,
+      plan: fullPlan
+    }), { ex: 3600 }); // Expire after 1 hour
+
+  } catch (error) {
+    console.error('Error generating plan:', error);
+    await redis.set(requestId, JSON.stringify({
+      status: 'error',
+      progress: 0,
+      error: 'Failed to generate plan'
+    }), { ex: 3600 }); // Expire after 1 hour
+  }
 } 

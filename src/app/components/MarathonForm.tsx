@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import TrainingPlan from './TrainingPlan';
 
@@ -18,12 +18,48 @@ export default function MarathonForm() {
   const [trainingPlan, setTrainingPlan] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [hasMore, setHasMore] = useState(false);
-  const [nextDate, setNextDate] = useState<string | null>(null);
+  const [requestId, setRequestId] = useState<string | null>(null);
+  const [progress, setProgress] = useState(0);
 
-  const generatePlan = async (startDate?: string) => {
+  // Poll for updates when we have a requestId
+  useEffect(() => {
+    if (!requestId || !isLoading) return;
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const response = await fetch(`/api/generate-plan?requestId=${requestId}`);
+        if (!response.ok) throw new Error('Failed to check status');
+        
+        const data = await response.json();
+        
+        if (data.status === 'complete') {
+          setTrainingPlan(data.plan);
+          setIsLoading(false);
+          clearInterval(pollInterval);
+        } else if (data.status === 'error') {
+          setError(data.error || 'Failed to generate plan');
+          setIsLoading(false);
+          clearInterval(pollInterval);
+        } else {
+          setProgress(data.progress);
+        }
+      } catch (error) {
+        console.error('Error checking status:', error);
+        setError('Failed to check plan status');
+        setIsLoading(false);
+        clearInterval(pollInterval);
+      }
+    }, 2000); // Poll every 2 seconds
+
+    return () => clearInterval(pollInterval);
+  }, [requestId, isLoading]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     setIsLoading(true);
     setError('');
+    setTrainingPlan('');
+    setProgress(0);
     
     try {
       const response = await fetch('/api/generate-plan', {
@@ -31,74 +67,17 @@ export default function MarathonForm() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          ...formData,
-          startDate
-        }),
+        body: JSON.stringify(formData),
       });
       
-      if (!response.ok) throw new Error('Failed to generate plan');
+      if (!response.ok) throw new Error('Failed to start plan generation');
       
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      
-      if (!reader) throw new Error('Failed to read response');
-      
-      let fullText = '';
-      
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        
-        const text = decoder.decode(value);
-        fullText += text;
-        
-        // Check if we have metadata
-        const metadataIndex = fullText.indexOf('\n\n__METADATA__');
-        if (metadataIndex !== -1) {
-          const planText = fullText.substring(0, metadataIndex);
-          const metadataText = fullText.substring(metadataIndex + 13); // 13 is length of '\n\n__METADATA__'
-          
-          try {
-            const metadata = JSON.parse(metadataText);
-            setHasMore(metadata.hasMore);
-            setNextDate(metadata.nextDate);
-          } catch (e) {
-            console.error('Failed to parse metadata:', e);
-          }
-          
-          if (startDate) {
-            setTrainingPlan(prev => prev + '\n\n' + planText);
-          } else {
-            setTrainingPlan(planText);
-          }
-          break;
-        }
-        
-        // Update the plan as we receive it
-        if (startDate) {
-          setTrainingPlan(prev => prev + text);
-        } else {
-          setTrainingPlan(text);
-        }
-      }
+      const data = await response.json();
+      setRequestId(data.requestId);
     } catch (error) {
       console.error('Error:', error);
-      setError('Failed to generate training plan. Please try again.');
-    } finally {
+      setError('Failed to start plan generation. Please try again.');
       setIsLoading(false);
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setTrainingPlan('');
-    generatePlan();
-  };
-
-  const handleLoadMore = () => {
-    if (nextDate) {
-      generatePlan(nextDate);
     }
   };
 
@@ -195,7 +174,7 @@ export default function MarathonForm() {
             isLoading ? 'opacity-50 cursor-not-allowed' : ''
           }`}
         >
-          {isLoading ? 'Generating Plan...' : 'Generate Training Plan'}
+          {isLoading ? `Generating Plan (${progress}%)...` : 'Generate Training Plan'}
         </button>
 
         {error && (
@@ -206,19 +185,6 @@ export default function MarathonForm() {
       {trainingPlan && (
         <div className="space-y-4">
           <TrainingPlan plan={trainingPlan} />
-          {hasMore && (
-            <div className="flex justify-center mt-4">
-              <button
-                onClick={handleLoadMore}
-                disabled={isLoading}
-                className={`bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                  isLoading ? 'opacity-50 cursor-not-allowed' : ''
-                }`}
-              >
-                {isLoading ? 'Loading More...' : 'Load Next Week'}
-              </button>
-            </div>
-          )}
         </div>
       )}
     </>
