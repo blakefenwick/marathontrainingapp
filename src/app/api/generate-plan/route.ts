@@ -3,6 +3,9 @@ import { NextResponse } from 'next/server';
 import { differenceInDays, addDays, format, subDays } from 'date-fns';
 import { StreamingTextResponse } from 'ai';
 
+// Configure runtime
+export const runtime = 'edge';
+
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
@@ -83,13 +86,13 @@ export async function POST(req: Request) {
     const daysUntilRace = Math.max(1, differenceInDays(raceDateObj, today) + 1);
     const lastTrainingDay = subDays(raceDateObj, 1);
 
-    // Break the plan into 14-day chunks
+    // Break the plan into 7-day chunks (one week at a time)
     const chunks: TrainingChunk[] = [];
     let currentStartDate = today;
     let weekNumber = 1;
 
     while (currentStartDate < lastTrainingDay) {
-      const chunkEndDate = addDays(currentStartDate, 13); // 14 days per chunk
+      const chunkEndDate = addDays(currentStartDate, 6); // 7 days per chunk
       const actualEndDate = chunkEndDate > lastTrainingDay ? lastTrainingDay : chunkEndDate;
       
       chunks.push({
@@ -98,75 +101,68 @@ export async function POST(req: Request) {
         weekNumber: weekNumber
       });
       
-      // Calculate how many weeks are in this chunk
-      const weeksInChunk = Math.ceil(differenceInDays(actualEndDate, currentStartDate) / 7);
-      weekNumber += weeksInChunk;
+      weekNumber += 1;
       currentStartDate = addDays(actualEndDate, 1);
     }
 
-    // Create a ReadableStream to stream the chunks
-    const stream = new ReadableStream({
-      async start(controller) {
-        try {
-          // Generate and stream each chunk
-          for (let i = 0; i < chunks.length; i++) {
-            const chunk = chunks[i];
-            const prompt = generatePromptForDateRange(
-              chunk.startDate,
-              chunk.endDate,
-              i === 0,
-              format(raceDateObj, 'EEEE, MMMM d, yyyy'),
-              goalTime,
-              currentMileage,
-              daysUntilRace,
-              chunk.weekNumber
-            );
+    // Create a TransformStream for streaming the response
+    const encoder = new TextEncoder();
+    const stream = new TransformStream();
+    const writer = stream.writable.getWriter();
 
-            const completion = await openai.chat.completions.create({
-              messages: [
-                {
-                  role: "system",
-                  content: "You are a marathon coach creating a training plan. Start each week with a mileage summary, then provide specific instructions for each day. Make sure daily workouts add up to weekly targets. Do not skip any days. Do not summarize."
-                },
-                {
-                  role: "user",
-                  content: prompt
-                }
-              ],
-              model: "gpt-3.5-turbo",
-              temperature: 0.7,
-              max_tokens: 2000
-            });
+    // Start processing chunks in the background
+    (async () => {
+      try {
+        for (let i = 0; i < chunks.length; i++) {
+          const chunk = chunks[i];
+          const prompt = generatePromptForDateRange(
+            chunk.startDate,
+            chunk.endDate,
+            i === 0,
+            format(raceDateObj, 'EEEE, MMMM d, yyyy'),
+            goalTime,
+            currentMileage,
+            daysUntilRace,
+            chunk.weekNumber
+          );
 
-            let chunkContent = completion.choices[0].message.content || '';
-            
-            // For chunks after the first, remove any overview text before the first week header
-            if (i > 0 && chunkContent) {
-              const firstWeekIndex = chunkContent.indexOf('## Week');
-              if (firstWeekIndex > 0) {
-                chunkContent = chunkContent.substring(firstWeekIndex);
+          const completion = await openai.chat.completions.create({
+            messages: [
+              {
+                role: "system",
+                content: "You are a marathon coach creating a training plan. Start each week with a mileage summary, then provide specific instructions for each day. Make sure daily workouts add up to weekly targets. Do not skip any days. Do not summarize."
+              },
+              {
+                role: "user",
+                content: prompt
               }
-            }
+            ],
+            model: "gpt-3.5-turbo",
+            temperature: 0.7,
+            max_tokens: 2000,
+            stream: true
+          });
 
-            // Add a newline between chunks
-            if (i > 0) {
-              controller.enqueue(new TextEncoder().encode('\n\n'));
+          for await (const part of completion) {
+            const text = part.choices[0]?.delta?.content || '';
+            if (text) {
+              await writer.write(encoder.encode(text));
             }
-
-            // Stream the chunk content
-            controller.enqueue(new TextEncoder().encode(chunkContent));
           }
 
-          // Close the stream
-          controller.close();
-        } catch (error) {
-          controller.error(error);
+          // Add a newline between chunks
+          if (i < chunks.length - 1) {
+            await writer.write(encoder.encode('\n\n'));
+          }
         }
+      } catch (error) {
+        console.error('Error in stream processing:', error);
+      } finally {
+        await writer.close();
       }
-    });
+    })();
 
-    // Return the streaming response
-    return new StreamingTextResponse(stream);
+    return new StreamingTextResponse(stream.readable);
 
   } catch (error) {
     console.error('Error generating training plan:', error);
