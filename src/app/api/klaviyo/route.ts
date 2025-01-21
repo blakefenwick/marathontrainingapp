@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-// Version 1.6.8 - Update to correct Klaviyo API endpoint
+// Version 1.6.9 - Update to Klaviyo's latest API (v2023-02)
 const KLAVIYO_API_KEY = process.env.KLAVIYO_API_KEY;
 const KLAVIYO_LIST_ID = process.env.KLAVIYO_LIST_ID || 'UEyYQh';
 
@@ -13,57 +13,93 @@ if (!KLAVIYO_LIST_ID) {
   console.error('KLAVIYO_LIST_ID is not configured');
 }
 
-async function subscribeToKlaviyo(email: string) {
-  console.log('Subscribing to Klaviyo with config:', {
+async function createOrUpdateProfile(email: string) {
+  console.log('Creating/updating Klaviyo profile:', {
     apiKeyConfigured: !!KLAVIYO_API_KEY,
-    listIdConfigured: !!KLAVIYO_LIST_ID,
     email
   });
 
   try {
-    const response = await fetch(`https://a.klaviyo.com/api/v2/list/${KLAVIYO_LIST_ID}/subscribe/`, {
+    const response = await fetch('https://a.klaviyo.com/api/profiles/', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Klaviyo-API-Key ${KLAVIYO_API_KEY}`
+        'Authorization': `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
+        'revision': '2023-02-22'
       },
       body: JSON.stringify({
-        profiles: [{
-          email: email,
-          opt_in_status: 'explicit'
+        data: {
+          type: 'profile',
+          attributes: {
+            email: email,
+            subscriptions: {
+              email: {
+                marketing: {
+                  consent: 'SUBSCRIBED'
+                }
+              }
+            }
+          }
+        }
+      }),
+    });
+
+    const responseData = await response.json();
+    
+    if (!response.ok) {
+      console.error('Failed to create/update profile:', {
+        status: response.status,
+        statusText: response.statusText,
+        error: responseData
+      });
+      throw new Error(responseData.errors?.[0]?.detail || 'Error creating/updating profile');
+    }
+    
+    console.log('Profile created/updated successfully:', responseData);
+    return responseData.data.id;
+  } catch (error) {
+    console.error('Error in createOrUpdateProfile:', error);
+    throw error;
+  }
+}
+
+async function subscribeToList(profileId: string) {
+  console.log('Subscribing profile to list:', {
+    listId: KLAVIYO_LIST_ID,
+    profileId
+  });
+
+  try {
+    const response = await fetch(`https://a.klaviyo.com/api/lists/${KLAVIYO_LIST_ID}/relationships/profiles/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
+        'revision': '2023-02-22'
+      },
+      body: JSON.stringify({
+        data: [{
+          type: 'profile',
+          id: profileId
         }]
       }),
     });
 
-    const responseText = await response.text();
-    let responseData;
-    try {
-      responseData = responseText ? JSON.parse(responseText) : {};
-    } catch (e) {
-      console.error('Failed to parse response:', responseText);
-      responseData = {};
-    }
-    
+    const responseData = await response.json();
+
     if (!response.ok) {
-      console.error('Klaviyo subscription failed:', {
+      console.error('Failed to subscribe profile to list:', {
         status: response.status,
         statusText: response.statusText,
-        error: responseData,
-        responseText,
-        requestBody: {
-          profiles: [{
-            email: email,
-            opt_in_status: 'explicit'
-          }]
-        }
+        error: responseData
       });
-      throw new Error(responseData.detail || responseText || 'Error subscribing user');
+      throw new Error(responseData.errors?.[0]?.detail || 'Error subscribing profile to list');
     }
-    
-    console.log('Successfully subscribed to Klaviyo:', responseData);
+
+    console.log('Profile successfully subscribed to list');
     return responseData;
   } catch (error) {
-    console.error('Error in subscribeToKlaviyo:', error);
+    console.error('Error in subscribeToList:', error);
     throw error;
   }
 }
@@ -88,9 +124,12 @@ export async function POST(request: Request) {
       );
     }
 
-    // Subscribe to Klaviyo list
+    // Step 1: Create or update the profile
     console.log('Starting Klaviyo subscription process for:', email);
-    await subscribeToKlaviyo(email);
+    const profileId = await createOrUpdateProfile(email);
+
+    // Step 2: Subscribe the profile to the list
+    await subscribeToList(profileId);
 
     console.log('Klaviyo subscription process completed successfully');
     return NextResponse.json({
