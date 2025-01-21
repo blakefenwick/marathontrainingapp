@@ -2,6 +2,7 @@ import { OpenAI } from 'openai';
 import { NextResponse } from 'next/server';
 import { differenceInDays, addDays, format } from 'date-fns';
 import { Redis } from '@upstash/redis';
+import { Resend } from 'resend';
 
 // Configure runtime
 export const runtime = 'edge';
@@ -238,48 +239,37 @@ Daily format:
       });
 
       try {
-        const emailUrl = new URL('/api/send-email', baseUrl).toString();
-        console.log('Sending email request to:', emailUrl);
+        // Send email directly using Resend
+        const resend = new Resend(process.env.RESEND_API_KEY);
+        console.log('Sending email using Resend directly...');
 
-        const emailResponse = await fetch(
-          emailUrl,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              email: state.email,
-              subject: 'Your Marathon Training Plan is Ready! 🏃‍♂️',
-              plan: fullPlan,
-              raceDate: format(raceDateObj, 'MMMM d, yyyy')
-            }),
-          }
-        );
+        const data = await resend.emails.send({
+          from: 'Marathon Training Plan <onboarding@resend.dev>',
+          to: state.email,
+          subject: 'Your Marathon Training Plan is Ready! 🏃‍♂️',
+          html: `
+            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+              <h1 style="color: #2563eb;">Your Marathon Training Plan</h1>
+              <p>Here's your personalized training plan for your marathon on ${format(raceDateObj, 'MMMM d, yyyy')}.</p>
+              <div style="background: #f3f4f6; padding: 20px; border-radius: 8px; white-space: pre-wrap; font-family: monospace;">
+                ${fullPlan}
+              </div>
+              <p style="margin-top: 20px; color: #4b5563;">
+                Good luck with your training! Remember to listen to your body and adjust the plan as needed.
+              </p>
+            </div>
+          `
+        });
 
-        console.log('Email API response status:', emailResponse.status);
-        
-        if (!emailResponse.ok) {
-          const errorText = await emailResponse.text(); // Use text() instead of json() to see the actual response
-          console.error('Failed to send email:', {
-            status: emailResponse.status,
-            response: errorText,
-            url: emailUrl,
-            recipientEmail: state.email
-          });
-        } else {
-          const responseData = await emailResponse.json();
-          console.log('Email sent successfully:', {
-            ...responseData,
-            recipientEmail: state.email,
-            url: emailUrl
-          });
-        }
+        console.log('Email sent successfully:', {
+          data,
+          recipientEmail: state.email
+        });
       } catch (emailError) {
         console.error('Error in email sending process:', {
           error: emailError instanceof Error ? emailError.message : 'Unknown error',
           stack: emailError instanceof Error ? emailError.stack : undefined,
-          recipientEmail: state.email,
-          baseUrl,
-          vercelUrl: process.env.VERCEL_URL
+          recipientEmail: state.email
         });
       }
     }
