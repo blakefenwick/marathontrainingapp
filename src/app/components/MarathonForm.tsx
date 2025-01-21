@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import TrainingPlan from './TrainingPlan';
 
@@ -19,47 +19,12 @@ export default function MarathonForm() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [requestId, setRequestId] = useState<string | null>(null);
-  const [progress, setProgress] = useState(0);
+  const [currentWeek, setCurrentWeek] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
 
-  // Poll for updates when we have a requestId
-  useEffect(() => {
-    if (!requestId || !isLoading) return;
-
-    const pollInterval = setInterval(async () => {
-      try {
-        const response = await fetch(`/api/generate-plan?requestId=${requestId}`);
-        if (!response.ok) throw new Error('Failed to check status');
-        
-        const data = await response.json();
-        
-        if (data.status === 'complete') {
-          setTrainingPlan(data.plan);
-          setIsLoading(false);
-          clearInterval(pollInterval);
-        } else if (data.status === 'error') {
-          setError(data.error || 'Failed to generate plan');
-          setIsLoading(false);
-          clearInterval(pollInterval);
-        } else {
-          setProgress(data.progress);
-        }
-      } catch (error) {
-        console.error('Error checking status:', error);
-        setError('Failed to check plan status');
-        setIsLoading(false);
-        clearInterval(pollInterval);
-      }
-    }, 2000); // Poll every 2 seconds
-
-    return () => clearInterval(pollInterval);
-  }, [requestId, isLoading]);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const generateWeek = async (weekNumber: number = 1) => {
     setIsLoading(true);
     setError('');
-    setTrainingPlan('');
-    setProgress(0);
     
     try {
       const response = await fetch('/api/generate-plan', {
@@ -67,17 +32,51 @@ export default function MarathonForm() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          ...formData,
+          requestId,
+          weekNumber
+        }),
       });
       
-      if (!response.ok) throw new Error('Failed to start plan generation');
+      if (!response.ok) throw new Error('Failed to generate plan');
       
       const data = await response.json();
-      setRequestId(data.requestId);
+      
+      // Save the requestId for subsequent requests
+      if (data.requestId) {
+        setRequestId(data.requestId);
+      }
+
+      // Add the new week's plan
+      if (weekNumber === 1) {
+        setTrainingPlan(data.plan);
+      } else {
+        setTrainingPlan(prev => prev + '\n\n' + data.plan);
+      }
+      
+      setHasMore(data.hasMore);
+      setCurrentWeek(data.nextWeek);
     } catch (error) {
       console.error('Error:', error);
-      setError('Failed to start plan generation. Please try again.');
+      setError('Failed to generate plan. Please try again.');
+    } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTrainingPlan('');
+    setRequestId(null);
+    setCurrentWeek(1);
+    setHasMore(false);
+    generateWeek(1);
+  };
+
+  const handleLoadMore = () => {
+    if (hasMore) {
+      generateWeek(currentWeek);
     }
   };
 
@@ -174,7 +173,7 @@ export default function MarathonForm() {
             isLoading ? 'opacity-50 cursor-not-allowed' : ''
           }`}
         >
-          {isLoading ? `Generating Plan (${progress}%)...` : 'Generate Training Plan'}
+          {isLoading ? `Generating Week ${currentWeek}...` : 'Generate Training Plan'}
         </button>
 
         {error && (
@@ -185,6 +184,19 @@ export default function MarathonForm() {
       {trainingPlan && (
         <div className="space-y-4">
           <TrainingPlan plan={trainingPlan} />
+          {hasMore && (
+            <div className="flex justify-center mt-4">
+              <button
+                onClick={handleLoadMore}
+                disabled={isLoading}
+                className={`bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                  isLoading ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
+              >
+                {isLoading ? `Generating Week ${currentWeek}...` : 'Load Next Week'}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </>

@@ -22,38 +22,104 @@ const redis = new Redis({
 
 export async function POST(req: Request) {
   try {
-    const { raceDate, goalTime, currentMileage } = await req.json();
+    const { raceDate, goalTime, currentMileage, requestId, weekNumber = 1 } = await req.json();
+
+    // If this is the first request, generate a new requestId
+    const currentRequestId = requestId || crypto.randomUUID();
     
-    // Generate a unique ID for this request
-    const requestId = crypto.randomUUID();
+    const today = weekNumber === 1 ? new Date() : new Date(raceDate);
+    const raceDateObj = new Date(raceDate);
+    const startDate = weekNumber === 1 ? today : addDays(today, (weekNumber - 1) * 7);
+    const endDate = addDays(startDate, 6);
+    const lastTrainingDay = endDate > raceDateObj ? raceDateObj : endDate;
+
+    // If we're past the race date, return completed
+    if (startDate >= raceDateObj) {
+      return NextResponse.json({
+        requestId: currentRequestId,
+        plan: '',
+        hasMore: false
+      });
+    }
+
+    const prompt = `Create a marathon training plan for Week ${weekNumber}.
+${weekNumber === 1 ? `
+Runner Profile:
+- Race Day: ${format(raceDateObj, 'EEEE, MMMM d, yyyy')}
+- Goal Time: ${goalTime.hours}h${goalTime.minutes}m${goalTime.seconds}s
+- Current Weekly Mileage: ${currentMileage} miles
+
+Training Overview:
+Provide a brief overview of the training approach.
+` : ''}
+
+Format the week like this:
+## Week ${weekNumber}
+> Weekly Target: [X] miles
+> Key Workouts: Long run ([X] miles), Speed work ([X] miles)
+> Build: [+/- X] miles from previous week
+
+Then list each day in this format:
+**[Full Day and Date]**
+Run: [Exact workout with distance]
+Pace: [Specific pace]
+Notes: [Brief tips]
+
+Generate the plan for these dates:
+${Array.from({ length: differenceInDays(lastTrainingDay, startDate) + 1 }).map((_, i) => {
+  const date = addDays(startDate, i);
+  return format(date, 'EEEE, MMMM d, yyyy');
+}).join('\n')}`;
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-3.5-turbo',
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a marathon coach. Create specific daily workouts that build progressively. Include distances, paces, and brief tips.'
+        },
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      max_tokens: 1000,
+      temperature: 0.5,
+    });
+
+    const weekPlan = response.choices[0]?.message?.content || '';
     
-    // Store initial status in Redis
-    await redis.set(requestId, JSON.stringify({
-      status: 'processing',
-      progress: 0,
-      plan: ''
+    // Get existing plan from Redis
+    const existingPlanData = await redis.get<string>(currentRequestId);
+    const existingPlan = existingPlanData ? JSON.parse(existingPlanData).plan : '';
+    
+    // Combine existing plan with new week
+    const fullPlan = existingPlan ? existingPlan + '\n\n' + weekPlan : weekPlan;
+    
+    // Store updated plan in Redis
+    await redis.set(currentRequestId, JSON.stringify({
+      plan: fullPlan,
+      weekNumber,
+      hasMore: lastTrainingDay < raceDateObj
     }), { ex: 3600 }); // Expire after 1 hour
-
-    // Start plan generation in the background
-    generatePlanInBackground(requestId, raceDate, goalTime, currentMileage);
-
-    // Return immediately with the request ID
-    return NextResponse.json({ 
-      requestId,
-      message: 'Plan generation started',
-      status: 'processing'
+    
+    return NextResponse.json({
+      requestId: currentRequestId,
+      plan: weekPlan,
+      hasMore: lastTrainingDay < raceDateObj,
+      nextWeek: weekNumber + 1
     });
 
   } catch (error) {
-    console.error('Error initiating plan generation:', error);
+    console.error('Error generating plan:', error);
     return NextResponse.json(
-      { error: 'Failed to start plan generation' },
+      { error: 'Failed to generate plan' },
       { status: 500 }
     );
   }
 }
 
-// New endpoint to check status
+// Endpoint to get the full plan
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
@@ -77,102 +143,10 @@ export async function GET(req: Request) {
     return NextResponse.json(JSON.parse(planData));
 
   } catch (error) {
-    console.error('Error checking plan status:', error);
+    console.error('Error retrieving plan:', error);
     return NextResponse.json(
-      { error: 'Failed to check plan status' },
+      { error: 'Failed to retrieve plan' },
       { status: 500 }
     );
-  }
-}
-
-async function generatePlanInBackground(requestId: string, raceDate: string, goalTime: any, currentMileage: string) {
-  try {
-    const today = new Date();
-    const raceDateObj = new Date(raceDate);
-    const totalDays = differenceInDays(raceDateObj, today);
-    let currentDate = today;
-    let weekNumber = 1;
-    let fullPlan = '';
-
-    // Generate plan week by week
-    while (currentDate < raceDateObj) {
-      const endDate = addDays(currentDate, 6);
-      const lastTrainingDay = endDate > raceDateObj ? raceDateObj : endDate;
-
-      const prompt = `Create a marathon training plan for the following 7 days.
-${weekNumber === 1 ? `
-Runner Profile:
-- Race Day: ${format(raceDateObj, 'EEEE, MMMM d, yyyy')}
-- Goal Time: ${goalTime.hours}h${goalTime.minutes}m${goalTime.seconds}s
-- Current Weekly Mileage: ${currentMileage} miles
-
-Training Overview:
-Provide a brief overview of the training approach.
-` : ''}
-
-Format each week like this:
-## Week ${weekNumber}
-> Weekly Target: [X] miles
-> Key Workouts: Long run ([X] miles), Speed work ([X] miles)
-> Build: [+/- X] miles from previous week
-
-Then list each day in this format:
-**[Full Day and Date]**
-Run: [Exact workout with distance]
-Pace: [Specific pace]
-Notes: [Brief tips]
-
-Generate the plan for these dates:
-${Array.from({ length: differenceInDays(lastTrainingDay, currentDate) + 1 }).map((_, i) => {
-  const date = addDays(currentDate, i);
-  return format(date, 'EEEE, MMMM d, yyyy');
-}).join('\n')}`;
-
-      const response = await openai.chat.completions.create({
-        model: 'gpt-3.5-turbo',
-        messages: [
-          {
-            role: 'system',
-            content: 'You are a marathon coach. Create specific daily workouts that build progressively. Include distances, paces, and brief tips.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        max_tokens: 1000,
-        temperature: 0.5,
-      });
-
-      const weekPlan = response.choices[0]?.message?.content || '';
-      fullPlan += (weekNumber > 1 ? '\n\n' : '') + weekPlan;
-
-      // Update progress in Redis
-      const progress = Math.min(100, Math.round((differenceInDays(lastTrainingDay, today) / totalDays) * 100));
-      await redis.set(requestId, JSON.stringify({
-        status: 'processing',
-        progress,
-        plan: fullPlan
-      }), { ex: 3600 }); // Expire after 1 hour
-
-      // Move to next week
-      currentDate = addDays(lastTrainingDay, 1);
-      weekNumber++;
-    }
-
-    // Mark as complete in Redis
-    await redis.set(requestId, JSON.stringify({
-      status: 'complete',
-      progress: 100,
-      plan: fullPlan
-    }), { ex: 3600 }); // Expire after 1 hour
-
-  } catch (error) {
-    console.error('Error generating plan:', error);
-    await redis.set(requestId, JSON.stringify({
-      status: 'error',
-      progress: 0,
-      error: 'Failed to generate plan'
-    }), { ex: 3600 }); // Expire after 1 hour
   }
 } 
