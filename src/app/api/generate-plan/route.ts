@@ -4,6 +4,7 @@ import { differenceInDays, addDays, format } from 'date-fns';
 
 // Configure runtime
 export const runtime = 'edge';
+export const dynamic = 'force-dynamic';
 
 // Version check
 console.log('Running Edge Runtime version with streaming - v2');
@@ -13,21 +14,31 @@ const openai = new OpenAI({
 });
 
 export async function POST(req: Request) {
-  try {
-    const { raceDate, goalTime, currentMileage, startDate } = await req.json();
+  // Create a TransformStream for streaming the response
+  const encoder = new TextEncoder();
+  const stream = new TransformStream();
+  const writer = stream.writable.getWriter();
 
-    // Calculate dates
-    const today = startDate ? new Date(startDate) : new Date();
-    const raceDateObj = new Date(raceDate);
-    const totalDays = differenceInDays(raceDateObj, today);
-    
-    // Generate plan for next 14 days only
-    const endDate = addDays(today, 13); // 14 days
-    const lastTrainingDay = endDate > raceDateObj ? raceDateObj : endDate;
-    const weekNumber = Math.floor(differenceInDays(today, new Date()) / 7) + 1;
+  // Start processing in the background
+  (async () => {
+    try {
+      const { raceDate, goalTime, currentMileage, startDate } = await req.json();
 
-    // Create optimized prompt
-    const prompt = `Create a marathon training plan for the following 14 days.
+      // Send initial response to prevent timeout
+      await writer.write(encoder.encode('Generating your training plan...\n\n'));
+
+      // Calculate dates
+      const today = startDate ? new Date(startDate) : new Date();
+      const raceDateObj = new Date(raceDate);
+      const totalDays = differenceInDays(raceDateObj, today);
+      
+      // Generate plan for next 7 days only (reduced from 14 for faster response)
+      const endDate = addDays(today, 6);
+      const lastTrainingDay = endDate > raceDateObj ? raceDateObj : endDate;
+      const weekNumber = Math.floor(differenceInDays(today, new Date()) / 7) + 1;
+
+      // Create optimized prompt
+      const prompt = `Create a marathon training plan for the following 7 days.
 ${weekNumber === 1 ? `
 Runner Profile:
 - Race Day: ${format(raceDateObj, 'EEEE, MMMM d, yyyy')}
@@ -56,36 +67,51 @@ ${Array.from({ length: differenceInDays(lastTrainingDay, today) + 1 }).map((_, i
   return format(date, 'EEEE, MMMM d, yyyy');
 }).join('\n')}`;
 
-    // Make API call with reduced tokens and temperature
-    const response = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a marathon coach. Create specific daily workouts that build progressively. Include distances, paces, and brief tips.'
-        },
-        {
-          role: 'user',
-          content: prompt
+      // Make API call with reduced tokens and temperature
+      const response = await openai.chat.completions.create({
+        model: 'gpt-3.5-turbo',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a marathon coach. Create specific daily workouts that build progressively. Include distances, paces, and brief tips.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        max_tokens: 1000,
+        temperature: 0.5,
+        stream: true,
+      });
+
+      // Stream the response
+      for await (const chunk of response) {
+        const text = chunk.choices[0]?.delta?.content || '';
+        if (text) {
+          await writer.write(encoder.encode(text));
         }
-      ],
-      max_tokens: 1000,
-      temperature: 0.5,
-    });
+      }
 
-    const plan = response.choices[0]?.message?.content || '';
-    
-    return NextResponse.json({
-      plan,
-      hasMore: lastTrainingDay < raceDateObj,
-      nextDate: addDays(lastTrainingDay, 1).toISOString()
-    });
+      // Send metadata at the end
+      await writer.write(encoder.encode('\n\n__METADATA__' + JSON.stringify({
+        hasMore: lastTrainingDay < raceDateObj,
+        nextDate: addDays(lastTrainingDay, 1).toISOString()
+      })));
 
-  } catch (error) {
-    console.error('Error generating plan:', error);
-    return NextResponse.json(
-      { error: 'Failed to generate training plan' },
-      { status: 500 }
-    );
-  }
+    } catch (error) {
+      console.error('Error generating plan:', error);
+      await writer.write(encoder.encode('Error: Failed to generate training plan'));
+    } finally {
+      await writer.close();
+    }
+  })();
+
+  // Return the stream immediately
+  return new Response(stream.readable, {
+    headers: {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Transfer-Encoding': 'chunked',
+    },
+  });
 } 

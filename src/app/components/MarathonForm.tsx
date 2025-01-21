@@ -39,16 +39,49 @@ export default function MarathonForm() {
       
       if (!response.ok) throw new Error('Failed to generate plan');
       
-      const data = await response.json();
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
       
-      if (startDate) {
-        setTrainingPlan(prev => prev + '\n\n' + data.plan);
-      } else {
-        setTrainingPlan(data.plan);
+      if (!reader) throw new Error('Failed to read response');
+      
+      let fullText = '';
+      
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        const text = decoder.decode(value);
+        fullText += text;
+        
+        // Check if we have metadata
+        const metadataIndex = fullText.indexOf('\n\n__METADATA__');
+        if (metadataIndex !== -1) {
+          const planText = fullText.substring(0, metadataIndex);
+          const metadataText = fullText.substring(metadataIndex + 13); // 13 is length of '\n\n__METADATA__'
+          
+          try {
+            const metadata = JSON.parse(metadataText);
+            setHasMore(metadata.hasMore);
+            setNextDate(metadata.nextDate);
+          } catch (e) {
+            console.error('Failed to parse metadata:', e);
+          }
+          
+          if (startDate) {
+            setTrainingPlan(prev => prev + '\n\n' + planText);
+          } else {
+            setTrainingPlan(planText);
+          }
+          break;
+        }
+        
+        // Update the plan as we receive it
+        if (startDate) {
+          setTrainingPlan(prev => prev + text);
+        } else {
+          setTrainingPlan(text);
+        }
       }
-      
-      setHasMore(data.hasMore);
-      setNextDate(data.nextDate);
     } catch (error) {
       console.error('Error:', error);
       setError('Failed to generate training plan. Please try again.');
@@ -182,7 +215,7 @@ export default function MarathonForm() {
                   isLoading ? 'opacity-50 cursor-not-allowed' : ''
                 }`}
               >
-                {isLoading ? 'Loading More...' : 'Load Next Month'}
+                {isLoading ? 'Loading More...' : 'Load Next Week'}
               </button>
             </div>
           )}
