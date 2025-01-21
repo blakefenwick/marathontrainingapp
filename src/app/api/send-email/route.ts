@@ -20,13 +20,13 @@ export async function POST(req: Request) {
     const { email, subject, plan, raceDate } = await req.json();
     console.log('Received email request for:', email);
 
-    // Use the email address you signed up with
-    const fromEmail = email; // This will use the same email as the recipient
+    // Use Resend's test email address
+    const fromEmail = 'onboarding@resend.dev';
     console.log('Sending from:', fromEmail);
 
     try {
       const data = await resend.emails.send({
-        from: fromEmail,
+        from: 'Marathon Training Plan <onboarding@resend.dev>',
         to: email,
         subject: subject,
         html: `
