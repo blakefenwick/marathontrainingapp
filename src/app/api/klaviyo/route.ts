@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-// Version 1.6.1 - Enhanced Klaviyo error handling
+// Version 1.6.5 - Enhanced Klaviyo error handling
 const KLAVIYO_API_KEY = process.env.KLAVIYO_API_KEY;
 const KLAVIYO_LIST_ID = process.env.KLAVIYO_LIST_ID || 'UEyYQh';
 
@@ -20,43 +20,44 @@ async function createProfile(email: string) {
     email
   });
 
-  const response = await fetch('https://a.klaviyo.com/api/profiles/', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
-      'revision': '2023-12-15'
-    },
-    body: JSON.stringify({
-      data: {
-        type: 'profile',
-        attributes: {
-          email: email,
-          subscriptions: {
-            email: {
-              marketing: {
-                consent: 'SUBSCRIBED'
-              }
-            }
-          }
-        },
+  try {
+    const response = await fetch('https://a.klaviyo.com/api/v2/people', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Klaviyo-API-Key ${KLAVIYO_API_KEY}`
       },
-    }),
-  });
-
-  const responseData = await response.json();
-  
-  if (!response.ok) {
-    console.error('Klaviyo profile creation failed:', {
-      status: response.status,
-      statusText: response.statusText,
-      error: responseData
+      body: JSON.stringify({
+        email: email,
+        properties: {
+          $consent: ['email']
+        }
+      }),
     });
-    throw new Error(responseData.detail || 'Error creating profile');
+
+    const responseData = await response.json();
+    
+    if (!response.ok) {
+      console.error('Klaviyo profile creation failed:', {
+        status: response.status,
+        statusText: response.statusText,
+        error: responseData,
+        requestBody: {
+          email: email,
+          properties: {
+            $consent: ['email']
+          }
+        }
+      });
+      throw new Error(responseData.detail || 'Error creating profile');
+    }
+    
+    console.log('Klaviyo profile created successfully:', responseData);
+    return responseData;
+  } catch (error) {
+    console.error('Error in createProfile:', error);
+    throw error;
   }
-  
-  console.log('Klaviyo profile created successfully');
-  return responseData;
 }
 
 async function subscribeToList(email: string) {
@@ -65,36 +66,42 @@ async function subscribeToList(email: string) {
     email
   });
 
-  const response = await fetch(`https://a.klaviyo.com/api/lists/${KLAVIYO_LIST_ID}/relationships/profiles/`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
-      'revision': '2023-12-15'
-    },
-    body: JSON.stringify({
-      data: [{
-        type: 'profile',
-        attributes: {
+  try {
+    const response = await fetch(`https://a.klaviyo.com/api/v2/list/${KLAVIYO_LIST_ID}/subscribe`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Klaviyo-API-Key ${KLAVIYO_API_KEY}`
+      },
+      body: JSON.stringify({
+        profiles: [{
           email: email
-        }
-      }]
-    }),
-  });
-
-  const responseData = await response.json();
-
-  if (!response.ok) {
-    console.error('Klaviyo list subscription failed:', {
-      status: response.status,
-      statusText: response.statusText,
-      error: responseData
+        }]
+      }),
     });
-    throw new Error(responseData.detail || 'Error subscribing to list');
-  }
 
-  console.log('Successfully subscribed to Klaviyo list');
-  return responseData;
+    const responseData = await response.json();
+
+    if (!response.ok) {
+      console.error('Klaviyo list subscription failed:', {
+        status: response.status,
+        statusText: response.statusText,
+        error: responseData,
+        requestBody: {
+          profiles: [{
+            email: email
+          }]
+        }
+      });
+      throw new Error(responseData.detail || 'Error subscribing to list');
+    }
+
+    console.log('Successfully subscribed to Klaviyo list:', responseData);
+    return responseData;
+  } catch (error) {
+    console.error('Error in subscribeToList:', error);
+    throw error;
+  }
 }
 
 export async function POST(request: Request) {
@@ -106,6 +113,14 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: 'Email is required' },
         { status: 400 }
+      );
+    }
+
+    if (!KLAVIYO_API_KEY) {
+      console.error('Klaviyo API key not configured');
+      return NextResponse.json(
+        { error: 'Klaviyo API key not configured' },
+        { status: 500 }
       );
     }
 
@@ -122,7 +137,12 @@ export async function POST(request: Request) {
     });
 
   } catch (error) {
-    console.error('Klaviyo API error:', error);
+    console.error('Klaviyo API error:', {
+      error: error instanceof Error ? {
+        message: error.message,
+        stack: error.stack
+      } : error
+    });
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to subscribe to Klaviyo' },
       { status: 500 }
