@@ -225,18 +225,24 @@ Daily format:
         .map(([_, plan]) => plan)
         .join('\n\n');
 
-      // Construct the email API URL - use relative URL instead of absolute
+      // Construct the email API URL with absolute URL
+      const baseUrl = process.env.VERCEL_URL 
+        ? `https://${process.env.VERCEL_URL}` 
+        : 'https://marathontrainingapp-12125.vercel.app';
+
       console.log('Email sending process started...', {
+        baseUrl,
         recipientEmail: state.email,
         planLength: fullPlan.length,
         raceDate: format(raceDateObj, 'MMMM d, yyyy')
       });
 
       try {
-        console.log('Sending email request...');
+        const emailUrl = new URL('/api/send-email', baseUrl).toString();
+        console.log('Sending email request to:', emailUrl);
 
         const emailResponse = await fetch(
-          '/api/send-email',
+          emailUrl,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -256,20 +262,24 @@ Daily format:
           console.error('Failed to send email:', {
             status: emailResponse.status,
             response: errorText,
+            url: emailUrl,
             recipientEmail: state.email
           });
         } else {
           const responseData = await emailResponse.json();
           console.log('Email sent successfully:', {
             ...responseData,
-            recipientEmail: state.email
+            recipientEmail: state.email,
+            url: emailUrl
           });
         }
       } catch (emailError) {
         console.error('Error in email sending process:', {
           error: emailError instanceof Error ? emailError.message : 'Unknown error',
           stack: emailError instanceof Error ? emailError.stack : undefined,
-          recipientEmail: state.email
+          recipientEmail: state.email,
+          baseUrl,
+          vercelUrl: process.env.VERCEL_URL
         });
       }
     }
