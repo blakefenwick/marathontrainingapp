@@ -1,6 +1,6 @@
 import MarathonForm from './components/MarathonForm';
 
-// Version 1.1.0 - Full email and Redis integration
+// Version 1.1.1 - Production deployment with environment variables
 export default function Home() {
   return (
     <main className="min-h-screen bg-gray-900 py-12">
