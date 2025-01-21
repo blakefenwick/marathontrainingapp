@@ -242,13 +242,26 @@ Daily format:
         const resend = new Resend(process.env.RESEND_API_KEY);
         console.log('Initializing email send to:', state.email);
 
+        // Check if we're in test mode (free tier)
+        const isTestMode = !process.env.RESEND_DOMAIN;
+        const allowedTestEmail = 'blake.fenwick1@gmail.com';
+
+        if (isTestMode && state.email !== allowedTestEmail) {
+          console.log('Test mode: Forwarding plan to verified email...', {
+            originalRecipient: state.email,
+            forwardingTo: allowedTestEmail
+          });
+        }
+
         const emailData = {
           from: 'Marathon Training Plan <onboarding@resend.dev>',
-          to: state.email,
+          to: isTestMode ? allowedTestEmail : state.email,
           subject: 'Your Marathon Training Plan is Ready! 🏃‍♂️',
           html: `
             <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
               <h1 style="color: #2563eb;">Your Marathon Training Plan</h1>
+              ${isTestMode && state.email !== allowedTestEmail ? 
+                `<p><strong>Note:</strong> This plan was requested by ${state.email}.</p>` : ''}
               <p>Here's your personalized training plan for your marathon on ${format(raceDateObj, 'MMMM d, yyyy')}.</p>
               <div style="background: #f3f4f6; padding: 20px; border-radius: 8px; white-space: pre-wrap; font-family: monospace;">
                 ${fullPlan}
@@ -263,14 +276,18 @@ Daily format:
         console.log('Sending email with data:', {
           to: emailData.to,
           from: emailData.from,
-          subject: emailData.subject
+          subject: emailData.subject,
+          isTestMode,
+          originalRecipient: state.email
         });
 
         const data = await resend.emails.send(emailData);
 
         console.log('Email sent successfully:', {
           data,
-          recipientEmail: state.email
+          recipientEmail: emailData.to,
+          originalRecipient: state.email,
+          isTestMode
         });
       } catch (emailError) {
         console.error('Error in email sending process:', {

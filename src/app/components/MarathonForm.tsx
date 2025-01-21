@@ -4,6 +4,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import TrainingPlan from './TrainingPlan';
+import { jsPDF } from 'jspdf';
 
 export default function MarathonForm() {
   const router = useRouter();
@@ -143,6 +144,47 @@ export default function MarathonForm() {
     }
   };
 
+  const handleDownloadPDF = () => {
+    const doc = new jsPDF();
+    
+    // Add title
+    doc.setFontSize(20);
+    doc.text('Marathon Training Plan', 20, 20);
+    
+    // Add race details
+    doc.setFontSize(12);
+    doc.text(`Race Date: ${formData.raceDate}`, 20, 35);
+    doc.text(`Goal Time: ${formData.goalTime.hours}h ${formData.goalTime.minutes}m ${formData.goalTime.seconds}s`, 20, 45);
+    doc.text(`Starting Weekly Mileage: ${formData.currentMileage} miles`, 20, 55);
+    
+    let yPosition = 70;
+    
+    // Add each week's plan
+    Object.entries(weeks)
+      .sort(([a], [b]) => parseInt(a) - parseInt(b))
+      .forEach(([week, plan]) => {
+        // Add page break if content will overflow
+        if (yPosition > 250) {
+          doc.addPage();
+          yPosition = 20;
+        }
+        
+        const lines = plan.split('\n');
+        lines.forEach(line => {
+          if (yPosition > 280) {
+            doc.addPage();
+            yPosition = 20;
+          }
+          doc.text(line, 20, yPosition);
+          yPosition += 7;
+        });
+        yPosition += 10;
+      });
+    
+    // Save the PDF
+    doc.save('marathon-training-plan.pdf');
+  };
+
   // Calculate progress percentage
   const progress = totalWeeks > 0 ? (currentWeek / totalWeeks) * 100 : 0;
 
@@ -150,21 +192,21 @@ export default function MarathonForm() {
     <>
       <form onSubmit={handleSubmit} className="max-w-md mx-auto space-y-6 p-6">
         <div className="space-y-2">
-          <label htmlFor="email" className="block text-sm font-medium text-white">
-            Your Email Address
+          <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+            Email Address
           </label>
-          <p className="text-sm text-gray-300 mb-2">
-            We&apos;ll email you your training plan when it&apos;s ready. You can also view it here in the app.
-          </p>
           <input
             type="email"
             id="email"
-            placeholder="you@example.com"
+            name="email"
             value={formData.email}
             onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-black p-2"
+            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
             required
           />
+          <p className="mt-1 text-sm text-gray-500">
+            During testing, all plans will be sent to blake.fenwick1@gmail.com. Your email will be included in the forwarded plan.
+          </p>
         </div>
 
         <div className="space-y-2">
@@ -259,6 +301,18 @@ export default function MarathonForm() {
         >
           {isLoading ? 'Generating Plan...' : 'Generate Training Plan'}
         </button>
+
+        {status === 'completed' && (
+          <div className="mt-4">
+            <button
+              type="button"
+              onClick={handleDownloadPDF}
+              className="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
+            >
+              Download Training Plan (PDF)
+            </button>
+          </div>
+        )}
 
         {error && (
           <div className="text-center mt-4">
