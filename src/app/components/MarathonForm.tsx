@@ -223,7 +223,7 @@ export default function MarathonForm() {
             required
           />
           <p className="mt-1 text-sm text-white-500">
-            Entering your email subscribes you to Veloci's email list. You can unsubscribe at any time in the future.
+            Entering your email subscribes you to Veloci&apos;s email list. You can unsubscribe at any time in the future.
           </p>
         </div>
 
