@@ -8,12 +8,20 @@ export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 
 // Version check
-console.log('Running Edge Runtime version with streaming - v3 (enhanced logging)');
+console.log('Running Edge Runtime version with streaming - v1.1.0');
 
-// Validate required environment variables
-if (!process.env.OPENAI_API_KEY) {
-  console.error('OpenAI API key is missing');
-}
+// Validate all required environment variables
+const requiredEnvVars = {
+  OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+  UPSTASH_REDIS_REST_URL: process.env.UPSTASH_REDIS_REST_URL,
+  UPSTASH_REDIS_REST_TOKEN: process.env.UPSTASH_REDIS_REST_TOKEN,
+  EMAIL_USER: process.env.EMAIL_USER,
+  EMAIL_PASS: process.env.EMAIL_PASS
+};
+
+console.log('Environment variables status:', Object.fromEntries(
+  Object.entries(requiredEnvVars).map(([key, value]) => [key, value ? 'Present' : 'Missing'])
+));
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || '',
