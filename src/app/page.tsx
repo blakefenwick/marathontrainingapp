@@ -1,6 +1,6 @@
 import MarathonForm from './components/MarathonForm';
 
-// Version 1.1.2 - New production deployment
+// Version 1.1.4 - Fix linting errors and escape apostrophes
 export default function Home() {
   return (
     <main className="min-h-screen bg-gray-900 py-12">
