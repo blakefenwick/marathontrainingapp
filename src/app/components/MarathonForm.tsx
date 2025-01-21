@@ -1,12 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import TrainingPlan from './TrainingPlan';
 
 export default function MarathonForm() {
   const router = useRouter();
   const [formData, setFormData] = useState({
+    email: '',
     raceDate: '',
     goalTime: {
       hours: '',
@@ -15,16 +16,49 @@ export default function MarathonForm() {
     },
     currentMileage: ''
   });
-  const [trainingPlan, setTrainingPlan] = useState<string>('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
   const [requestId, setRequestId] = useState<string | null>(null);
-  const [currentWeek, setCurrentWeek] = useState(1);
-  const [hasMore, setHasMore] = useState(false);
+  const [status, setStatus] = useState<string>('');
+  const [plan, setPlan] = useState<string>('');
+  const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
-  const generateWeek = async (weekNumber: number = 1) => {
+  // Poll for status updates
+  useEffect(() => {
+    if (!requestId) return;
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const response = await fetch(`/api/generate-plan?requestId=${requestId}`);
+        if (!response.ok) throw new Error('Failed to check status');
+        
+        const data = await response.json();
+        setStatus(data.status);
+        
+        if (data.status === 'completed') {
+          setPlan(data.plan);
+          clearInterval(pollInterval);
+          setIsLoading(false);
+        } else if (data.status === 'error') {
+          setError('Failed to generate plan. Please try again.');
+          clearInterval(pollInterval);
+          setIsLoading(false);
+        } else if (data.status === 'processing') {
+          setPlan(data.plan || '');
+        }
+      } catch (error) {
+        console.error('Error checking status:', error);
+      }
+    }, 5000); // Poll every 5 seconds
+
+    return () => clearInterval(pollInterval);
+  }, [requestId]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     setIsLoading(true);
     setError('');
+    setPlan('');
+    setRequestId(null);
     
     try {
       const response = await fetch('/api/generate-plan', {
@@ -32,57 +66,39 @@ export default function MarathonForm() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          ...formData,
-          requestId,
-          weekNumber
-        }),
+        body: JSON.stringify(formData),
       });
       
       if (!response.ok) throw new Error('Failed to generate plan');
       
       const data = await response.json();
+      setRequestId(data.requestId);
+      setStatus('processing');
       
-      // Save the requestId for subsequent requests
-      if (data.requestId) {
-        setRequestId(data.requestId);
-      }
-
-      // Add the new week's plan
-      if (weekNumber === 1) {
-        setTrainingPlan(data.plan);
-      } else {
-        setTrainingPlan(prev => prev + '\n\n' + data.plan);
-      }
-      
-      setHasMore(data.hasMore);
-      setCurrentWeek(data.nextWeek);
     } catch (error) {
       console.error('Error:', error);
       setError('Failed to generate plan. Please try again.');
-    } finally {
       setIsLoading(false);
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setTrainingPlan('');
-    setRequestId(null);
-    setCurrentWeek(1);
-    setHasMore(false);
-    generateWeek(1);
-  };
-
-  const handleLoadMore = () => {
-    if (hasMore) {
-      generateWeek(currentWeek);
     }
   };
 
   return (
     <>
       <form onSubmit={handleSubmit} className="max-w-md mx-auto space-y-6 p-6">
+        <div className="space-y-2">
+          <label htmlFor="email" className="block text-sm font-medium text-white">
+            Your Email Address
+          </label>
+          <input
+            type="email"
+            id="email"
+            value={formData.email}
+            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-black"
+            required
+          />
+        </div>
+
         <div className="space-y-2">
           <label htmlFor="raceDate" className="block text-sm font-medium text-white">
             When is your race?
@@ -173,30 +189,23 @@ export default function MarathonForm() {
             isLoading ? 'opacity-50 cursor-not-allowed' : ''
           }`}
         >
-          {isLoading ? `Generating Week ${currentWeek}...` : 'Generate Training Plan'}
+          {isLoading ? 'Generating Plan...' : 'Generate Training Plan'}
         </button>
 
         {error && (
           <p className="text-red-500 text-sm text-center mt-2">{error}</p>
         )}
+
+        {status === 'processing' && (
+          <p className="text-green-500 text-sm text-center mt-2">
+            Generating your training plan... You'll receive an email when it's ready.
+          </p>
+        )}
       </form>
 
-      {trainingPlan && (
+      {plan && (
         <div className="space-y-4">
-          <TrainingPlan plan={trainingPlan} />
-          {hasMore && (
-            <div className="flex justify-center mt-4">
-              <button
-                onClick={handleLoadMore}
-                disabled={isLoading}
-                className={`bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                  isLoading ? 'opacity-50 cursor-not-allowed' : ''
-                }`}
-              >
-                {isLoading ? `Generating Week ${currentWeek}...` : 'Load Next Week'}
-              </button>
-            </div>
-          )}
+          <TrainingPlan plan={plan} />
         </div>
       )}
     </>
