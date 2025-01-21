@@ -10,6 +10,11 @@ export const dynamic = 'force-dynamic';
 // Version check
 console.log('Running Edge Runtime version with streaming - v3 (enhanced logging)');
 
+// Validate required environment variables
+if (!process.env.OPENAI_API_KEY) {
+  console.error('OpenAI API key is missing');
+}
+
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || '',
 });
@@ -80,6 +85,11 @@ export async function POST(req: Request) {
   try {
     console.log('Starting plan generation request...');
     
+    // Validate OpenAI API key
+    if (!process.env.OPENAI_API_KEY) {
+      throw new Error('OpenAI API key is not configured. Please add it to your environment variables.');
+    }
+    
     const { raceDate, goalTime, currentMileage, email } = await req.json();
     console.log('Received data:', { raceDate, goalTime, currentMileage, email });
     
@@ -125,19 +135,35 @@ async function generateFullPlan(
   email: string
 ) {
   try {
-    console.log('Starting plan generation for requestId:', requestId);
+    console.log('Starting plan generation for requestId:', requestId, {
+      raceDate,
+      goalTime,
+      currentMileage,
+      email
+    });
     
     const raceDateObj = new Date(raceDate);
+    console.log('Race date parsed:', raceDateObj);
+    
     const today = new Date();
+    console.log('Today:', today);
+    
     let currentWeek = 1;
     let fullPlan = '';
 
     while (true) {
-      console.log(`Generating week ${currentWeek}...`);
+      console.log(`Starting generation for week ${currentWeek}...`);
       
       const startDate = currentWeek === 1 ? today : addDays(today, (currentWeek - 1) * 7);
       const endDate = addDays(startDate, 6);
       const lastTrainingDay = endDate > raceDateObj ? raceDateObj : endDate;
+
+      console.log('Week dates:', {
+        startDate,
+        endDate,
+        lastTrainingDay,
+        isAfterRaceDate: startDate >= raceDateObj
+      });
 
       if (startDate >= raceDateObj) {
         console.log('Reached race date, stopping generation');
@@ -146,6 +172,7 @@ async function generateFullPlan(
 
       // Generate plan for current week
       try {
+        console.log('Preparing prompt for week', currentWeek);
         const prompt = `Create a marathon training plan for Week ${currentWeek}.
 ${currentWeek === 1 ? `
 Runner Profile:
@@ -175,6 +202,7 @@ ${Array.from({ length: differenceInDays(lastTrainingDay, startDate) + 1 }).map((
   return format(date, 'EEEE, MMMM d, yyyy');
 }).join('\n')}`;
 
+        console.log('Calling OpenAI API...');
         const response = await openai.chat.completions.create({
           model: 'gpt-3.5-turbo',
           messages: [
@@ -190,27 +218,43 @@ ${Array.from({ length: differenceInDays(lastTrainingDay, startDate) + 1 }).map((
           max_tokens: 1000,
           temperature: 0.5,
         });
-        console.log(`Week ${currentWeek} generated successfully`);
+        console.log('OpenAI API response received');
 
         const weekPlan = response.choices[0]?.message?.content || '';
+        console.log(`Week ${currentWeek} plan generated:`, weekPlan.substring(0, 100) + '...');
+        
         fullPlan += (fullPlan ? '\n\n' : '') + weekPlan;
-      } catch (openaiError) {
+      } catch (openaiError: any) {
         console.error('OpenAI API error:', openaiError);
-        throw new Error('Failed to generate training plan');
+        console.error('OpenAI error details:', {
+          name: openaiError.name,
+          message: openaiError.message,
+          stack: openaiError.stack
+        });
+        throw new Error('Failed to generate training plan: ' + openaiError.message);
       }
 
       // Update progress
-      await storage('set', `request:${requestId}`, JSON.stringify({
-        status: 'processing',
-        email,
-        raceDate,
-        goalTime,
-        currentMileage,
-        plan: fullPlan,
-        completedWeeks: currentWeek
-      }), { ex: 3600 });
+      try {
+        console.log(`Updating progress for week ${currentWeek}`);
+        await storage('set', `request:${requestId}`, JSON.stringify({
+          status: 'processing',
+          email,
+          raceDate,
+          goalTime,
+          currentMileage,
+          plan: fullPlan,
+          completedWeeks: currentWeek
+        }), { ex: 3600 });
+        console.log('Progress updated successfully');
+      } catch (storageError: any) {
+        console.error('Failed to update progress:', storageError);
+      }
 
-      if (lastTrainingDay >= raceDateObj) break;
+      if (lastTrainingDay >= raceDateObj) {
+        console.log('Reached last training day, stopping generation');
+        break;
+      }
       currentWeek++;
     }
 
@@ -218,6 +262,7 @@ ${Array.from({ length: differenceInDays(lastTrainingDay, startDate) + 1 }).map((
     
     // Send email using the separate email endpoint
     try {
+      console.log('Preparing to send email to:', email);
       const emailResponse = await fetch(`${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000'}/api/send-email`, {
         method: 'POST',
         headers: {
@@ -234,31 +279,43 @@ ${Array.from({ length: differenceInDays(lastTrainingDay, startDate) + 1 }).map((
       if (!emailResponse.ok) {
         const errorData = await emailResponse.json();
         console.error('Email sending failed:', errorData);
-        throw new Error('Failed to send email');
+        throw new Error('Failed to send email: ' + JSON.stringify(errorData));
       }
       console.log('Email sent successfully');
-    } catch (emailError) {
+    } catch (emailError: any) {
       console.error('Email error:', emailError);
-      throw new Error('Failed to send email');
+      throw new Error('Failed to send email: ' + emailError.message);
     }
 
     // Update final status
-    await storage('set', `request:${requestId}`, JSON.stringify({
-      status: 'completed',
-      email,
-      raceDate,
-      goalTime,
-      currentMileage,
-      plan: fullPlan,
-      completedWeeks: currentWeek
-    }), { ex: 3600 });
+    try {
+      console.log('Updating final status');
+      await storage('set', `request:${requestId}`, JSON.stringify({
+        status: 'completed',
+        email,
+        raceDate,
+        goalTime,
+        currentMileage,
+        plan: fullPlan,
+        completedWeeks: currentWeek
+      }), { ex: 3600 });
+      console.log('Final status updated successfully');
+    } catch (storageError) {
+      console.error('Failed to update final status:', storageError);
+    }
 
   } catch (error) {
     console.error('Error in generateFullPlan:', error);
-    await storage('set', `request:${requestId}`, JSON.stringify({
-      status: 'error',
-      error: error instanceof Error ? error.message : 'Failed to generate plan'
-    }), { ex: 3600 });
+    try {
+      console.log('Updating error status');
+      await storage('set', `request:${requestId}`, JSON.stringify({
+        status: 'error',
+        error: error instanceof Error ? error.message : 'Failed to generate plan'
+      }), { ex: 3600 });
+      console.log('Error status updated successfully');
+    } catch (storageError) {
+      console.error('Failed to update error status:', storageError);
+    }
   }
 }
 
