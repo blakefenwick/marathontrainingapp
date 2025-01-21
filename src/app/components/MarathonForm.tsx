@@ -1,6 +1,6 @@
 'use client';
 
-// Version 1.0.1 - Email-based plan generation with progress tracking
+// Version 1.0.2 - Enhanced error logging
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import TrainingPlan from './TrainingPlan';
@@ -29,21 +29,32 @@ export default function MarathonForm() {
 
     const pollInterval = setInterval(async () => {
       try {
+        console.log('Polling for status update...', requestId);
         const response = await fetch(`/api/generate-plan?requestId=${requestId}`);
-        if (!response.ok) throw new Error('Failed to check status');
+        console.log('Status response:', response.status);
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          console.error('Status check failed:', errorData);
+          throw new Error('Failed to check status');
+        }
         
         const data = await response.json();
+        console.log('Status data:', data);
         setStatus(data.status);
         
         if (data.status === 'completed') {
+          console.log('Plan generation completed');
           setPlan(data.plan);
           clearInterval(pollInterval);
           setIsLoading(false);
         } else if (data.status === 'error') {
-          setError('Failed to generate plan. Please try again.');
+          console.error('Plan generation failed:', data.error);
+          setError(data.error || 'Failed to generate plan. Please try again.');
           clearInterval(pollInterval);
           setIsLoading(false);
         } else if (data.status === 'processing') {
+          console.log('Plan generation in progress:', data.completedWeeks ? `Week ${data.completedWeeks}` : 'Starting');
           setPlan(data.plan || '');
         }
       } catch (error) {
@@ -62,6 +73,7 @@ export default function MarathonForm() {
     setRequestId(null);
     
     try {
+      console.log('Submitting form data:', formData);
       const response = await fetch('/api/generate-plan', {
         method: 'POST',
         headers: {
@@ -70,15 +82,21 @@ export default function MarathonForm() {
         body: JSON.stringify(formData),
       });
       
-      if (!response.ok) throw new Error('Failed to generate plan');
+      console.log('Form submission response:', response.status);
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('Form submission failed:', errorData);
+        throw new Error(errorData.error || 'Failed to generate plan');
+      }
       
       const data = await response.json();
+      console.log('Form submission successful:', data);
       setRequestId(data.requestId);
       setStatus('processing');
       
     } catch (error) {
-      console.error('Error:', error);
-      setError('Failed to generate plan. Please try again.');
+      console.error('Form submission error:', error);
+      setError(error instanceof Error ? error.message : 'Failed to generate plan. Please try again.');
       setIsLoading(false);
     }
   };
@@ -198,7 +216,10 @@ export default function MarathonForm() {
         </button>
 
         {error && (
-          <p className="text-red-500 text-sm text-center mt-2">{error}</p>
+          <div className="text-center mt-4">
+            <p className="text-red-500 text-sm">{error}</p>
+            <p className="text-gray-300 text-xs mt-1">Check the browser console for detailed error information.</p>
+          </div>
         )}
 
         {status === 'processing' && (

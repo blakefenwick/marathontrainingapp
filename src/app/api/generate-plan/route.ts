@@ -8,10 +8,19 @@ export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 
 // Version check
-console.log('Running Edge Runtime version with streaming - v2');
+console.log('Running Edge Runtime version with streaming - v3 (enhanced logging)');
 
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+  apiKey: process.env.OPENAI_API_KEY || '',
+});
+
+// Log OpenAI API key status
+console.log('OpenAI API Key status:', process.env.OPENAI_API_KEY ? 'Present' : 'Missing');
+
+// Log Redis configuration
+console.log('Redis configuration:', {
+  hasUrl: !!process.env.UPSTASH_REDIS_REST_URL,
+  hasToken: !!process.env.UPSTASH_REDIS_REST_TOKEN
 });
 
 // Initialize Redis client or use in-memory storage for local development
