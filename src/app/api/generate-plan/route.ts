@@ -94,28 +94,32 @@ export async function POST(req: Request) {
 export async function PUT(req: Request) {
   try {
     const { requestId, weekNumber } = await req.json();
+    console.log('Generating week', weekNumber, 'for request', requestId);
     
     // Get current state
-    const stateStr = await redis.get<string>(`request:${requestId}`);
-    if (!stateStr) {
-      throw new Error('Request not found');
-    }
-    
-    const state = JSON.parse(stateStr) as PlanState;
-    const raceDateObj = new Date(state.raceDate);
-    const today = new Date();
-    
-    // Calculate dates for this week
-    const startDate = addDays(today, (weekNumber - 1) * 7);
-    const endDate = addDays(startDate, 6);
-    const lastTrainingDay = endDate > raceDateObj ? raceDateObj : endDate;
+    try {
+      const stateStr = await redis.get<string>(`request:${requestId}`);
+      if (!stateStr) {
+        console.error('Week generation failed: Request not found for ID:', requestId);
+        throw new Error('Request not found');
+      }
+      
+      try {
+        const state = JSON.parse(stateStr) as PlanState;
+        const raceDateObj = new Date(state.raceDate);
+        const today = new Date();
+        
+        // Calculate dates for this week
+        const startDate = addDays(today, (weekNumber - 1) * 7);
+        const endDate = addDays(startDate, 6);
+        const lastTrainingDay = endDate > raceDateObj ? raceDateObj : endDate;
 
-    if (startDate >= raceDateObj) {
-      throw new Error('Week is beyond race date');
-    }
+        if (startDate >= raceDateObj) {
+          throw new Error('Week is beyond race date');
+        }
 
-    // Generate plan for this week
-    const prompt = `Create a marathon training plan for Week ${weekNumber}.
+        // Generate plan for this week
+        const prompt = `Create a marathon training plan for Week ${weekNumber}.
 Runner Profile:
 - Race Day: ${format(raceDateObj, 'EEEE, MMMM d, yyyy')}
 - Goal Time: ${state.goalTime.hours}h${state.goalTime.minutes}m${state.goalTime.seconds}s
@@ -139,69 +143,79 @@ ${Array.from({ length: differenceInDays(lastTrainingDay, startDate) + 1 }).map((
   return format(date, 'EEEE, MMMM d, yyyy');
 }).join('\n')}`;
 
-    const response = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a marathon coach. Create specific daily workouts that build progressively. Include distances, paces, and brief tips.'
-        },
-        {
-          role: 'user',
-          content: prompt
+        const response = await openai.chat.completions.create({
+          model: 'gpt-3.5-turbo',
+          messages: [
+            {
+              role: 'system',
+              content: 'You are a marathon coach. Create specific daily workouts that build progressively. Include distances, paces, and brief tips.'
+            },
+            {
+              role: 'user',
+              content: prompt
+            }
+          ],
+          max_tokens: 1000,
+          temperature: 0.5,
+        });
+
+        const weekPlan = response.choices[0]?.message?.content || '';
+        
+        // Update state with new week
+        state.weeks[weekNumber] = weekPlan;
+        state.currentWeek = weekNumber;
+        state.status = weekNumber === state.totalWeeks ? 'completed' : 'in_progress';
+        
+        // If this is the last week, send email
+        if (state.status === 'completed') {
+          const fullPlan = Object.entries(state.weeks)
+            .sort(([a], [b]) => parseInt(a) - parseInt(b))
+            .map(([_, plan]) => plan)
+            .join('\n\n');
+
+          const emailResponse = await fetch(
+            `${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000'}/api/send-email`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                email: state.email,
+                subject: 'Your Complete Marathon Training Plan',
+                plan: fullPlan,
+                raceDate: format(raceDateObj, 'MMMM d, yyyy')
+              }),
+            }
+          );
+
+          if (!emailResponse.ok) {
+            console.error('Failed to send email');
+          }
         }
-      ],
-      max_tokens: 1000,
-      temperature: 0.5,
-    });
 
-    const weekPlan = response.choices[0]?.message?.content || '';
-    
-    // Update state with new week
-    state.weeks[weekNumber] = weekPlan;
-    state.currentWeek = weekNumber;
-    state.status = weekNumber === state.totalWeeks ? 'completed' : 'in_progress';
-    
-    // If this is the last week, send email
-    if (state.status === 'completed') {
-      const fullPlan = Object.entries(state.weeks)
-        .sort(([a], [b]) => parseInt(a) - parseInt(b))
-        .map(([_, plan]) => plan)
-        .join('\n\n');
+        // Save updated state
+        await redis.set(`request:${requestId}`, JSON.stringify(state), { ex: 3600 });
 
-      const emailResponse = await fetch(
-        `${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000'}/api/send-email`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email: state.email,
-            subject: 'Your Complete Marathon Training Plan',
-            plan: fullPlan,
-            raceDate: format(raceDateObj, 'MMMM d, yyyy')
-          }),
-        }
-      );
-
-      if (!emailResponse.ok) {
-        console.error('Failed to send email');
+        return NextResponse.json({
+          status: state.status,
+          weekPlan,
+          currentWeek: weekNumber,
+          totalWeeks: state.totalWeeks
+        });
+      } catch (parseError) {
+        console.error('Failed to parse state data:', parseError);
+        throw new Error('Invalid state data');
       }
+    } catch (redisError) {
+      console.error('Redis error:', redisError);
+      throw new Error('Database error');
     }
-
-    // Save updated state
-    await redis.set(`request:${requestId}`, JSON.stringify(state), { ex: 3600 });
-
-    return NextResponse.json({
-      status: state.status,
-      weekPlan,
-      currentWeek: weekNumber,
-      totalWeeks: state.totalWeeks
-    });
-
   } catch (error) {
     console.error('Error generating week:', error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to generate week' },
+      { 
+        error: error instanceof Error ? error.message : 'Failed to generate week',
+        details: error instanceof Error ? error.stack : undefined
+      },
       { status: 500 }
     );
   }
@@ -214,33 +228,61 @@ export async function GET(req: Request) {
     const requestId = url.searchParams.get('requestId');
 
     if (!requestId) {
+      console.error('Status check failed: No requestId provided');
       return NextResponse.json(
         { error: 'No requestId provided' },
         { status: 400 }
       );
     }
 
-    const data = await redis.get<string>(`request:${requestId}`);
-    if (!data) {
+    console.log('Checking status for requestId:', requestId);
+
+    try {
+      const data = await redis.get<string>(`request:${requestId}`);
+      console.log('Redis response:', data ? 'Data found' : 'No data found');
+      
+      if (!data) {
+        console.error('Status check failed: Request not found for ID:', requestId);
+        return NextResponse.json(
+          { error: 'Request not found' },
+          { status: 404 }
+        );
+      }
+
+      try {
+        const state = JSON.parse(data) as PlanState;
+        console.log('Current state:', {
+          status: state.status,
+          currentWeek: state.currentWeek,
+          totalWeeks: state.totalWeeks,
+          hasWeeks: Object.keys(state.weeks).length > 0
+        });
+
+        return NextResponse.json({
+          status: state.status,
+          currentWeek: state.currentWeek,
+          totalWeeks: state.totalWeeks,
+          weeks: state.weeks,
+          startTime: state.startTime
+        });
+      } catch (parseError) {
+        console.error('Failed to parse state data:', parseError);
+        return NextResponse.json(
+          { error: 'Invalid state data' },
+          { status: 500 }
+        );
+      }
+    } catch (redisError) {
+      console.error('Redis error:', redisError);
       return NextResponse.json(
-        { error: 'Request not found' },
-        { status: 404 }
+        { error: 'Database error' },
+        { status: 500 }
       );
     }
-
-    const state = JSON.parse(data) as PlanState;
-    return NextResponse.json({
-      status: state.status,
-      currentWeek: state.currentWeek,
-      totalWeeks: state.totalWeeks,
-      weeks: state.weeks,
-      startTime: state.startTime
-    });
-
   } catch (error) {
-    console.error('Error checking status:', error);
+    console.error('Error in GET handler:', error);
     return NextResponse.json(
-      { error: 'Failed to check status' },
+      { error: 'Failed to check status', details: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }
     );
   }
