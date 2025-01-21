@@ -1,16 +1,20 @@
 import { NextResponse } from 'next/server';
 
-// Version 1.7.1 - Improve Klaviyo API error handling and response parsing
-const KLAVIYO_API_KEY = process.env.KLAVIYO_API_KEY;
-const KLAVIYO_LIST_ID = process.env.KLAVIYO_LIST_ID || 'UEyYQh';
+// Version 1.7.2 - Add API key validation and whitespace trimming
+const KLAVIYO_API_KEY = process.env.KLAVIYO_API_KEY?.trim();
+const KLAVIYO_LIST_ID = process.env.KLAVIYO_LIST_ID?.trim() || 'UEyYQh';
 
 // Validate environment variables
 if (!KLAVIYO_API_KEY) {
   console.error('KLAVIYO_API_KEY is not configured');
+} else {
+  console.log('Using Klaviyo API key:', `${KLAVIYO_API_KEY.substring(0, 8)}...`);
 }
 
 if (!KLAVIYO_LIST_ID) {
   console.error('KLAVIYO_LIST_ID is not configured');
+} else {
+  console.log('Using Klaviyo List ID:', KLAVIYO_LIST_ID);
 }
 
 async function createOrUpdateProfile(email: string) {
