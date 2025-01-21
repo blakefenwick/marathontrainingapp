@@ -11,6 +11,24 @@ export const maxDuration = 60;
 // Version check
 console.log('Running Edge Runtime version - v1.2.0 (Chunked Generation)');
 
+// Define types
+interface PlanState {
+  status: 'initialized' | 'in_progress' | 'completed' | 'error';
+  email: string;
+  raceDate: string;
+  goalTime: {
+    hours: string;
+    minutes: string;
+    seconds: string;
+  };
+  currentMileage: string;
+  totalWeeks: number;
+  currentWeek: number;
+  weeks: Record<string, string>;
+  error: string | null;
+  startTime: string;
+}
+
 // Initialize OpenAI client
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || '',
@@ -41,8 +59,7 @@ export async function POST(req: Request) {
     const raceDateObj = new Date(raceDate);
     const totalWeeks = calculateTotalWeeks(today, raceDateObj);
 
-    // Initialize request in Redis
-    await redis.set(`request:${requestId}`, JSON.stringify({
+    const initialState: PlanState = {
       status: 'initialized',
       email,
       raceDate,
@@ -53,7 +70,10 @@ export async function POST(req: Request) {
       weeks: {},
       error: null,
       startTime: new Date().toISOString()
-    }), { ex: 3600 }); // Expire in 1 hour
+    };
+
+    // Initialize request in Redis
+    await redis.set(`request:${requestId}`, JSON.stringify(initialState), { ex: 3600 }); // Expire in 1 hour
 
     return NextResponse.json({
       message: "Training plan generation initialized",
@@ -76,12 +96,12 @@ export async function PUT(req: Request) {
     const { requestId, weekNumber } = await req.json();
     
     // Get current state
-    const stateStr = await redis.get(`request:${requestId}`);
+    const stateStr = await redis.get<string>(`request:${requestId}`);
     if (!stateStr) {
       throw new Error('Request not found');
     }
     
-    const state = JSON.parse(stateStr);
+    const state = JSON.parse(stateStr) as PlanState;
     const raceDateObj = new Date(state.raceDate);
     const today = new Date();
     
@@ -200,7 +220,7 @@ export async function GET(req: Request) {
       );
     }
 
-    const data = await redis.get(`request:${requestId}`);
+    const data = await redis.get<string>(`request:${requestId}`);
     if (!data) {
       return NextResponse.json(
         { error: 'Request not found' },
@@ -208,7 +228,7 @@ export async function GET(req: Request) {
       );
     }
 
-    const state = JSON.parse(data);
+    const state = JSON.parse(data) as PlanState;
     return NextResponse.json({
       status: state.status,
       currentWeek: state.currentWeek,
