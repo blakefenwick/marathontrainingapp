@@ -6,6 +6,9 @@ import { StreamingTextResponse } from 'ai';
 // Configure runtime
 export const runtime = 'edge';
 
+// Version check
+console.log('Running Edge Runtime version with streaming - v1');
+
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
