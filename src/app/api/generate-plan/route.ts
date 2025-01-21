@@ -232,10 +232,19 @@ Daily format:
           ? 'http://localhost:3000'
           : 'https://marathontrainingapp-12125.vercel.app';
 
-      console.log('Sending email with plan...');
+      console.log('Email sending process started...', {
+        baseUrl,
+        recipientEmail: state.email,
+        planLength: fullPlan.length,
+        raceDate: format(raceDateObj, 'MMMM d, yyyy')
+      });
+
       try {
+        const emailUrl = `${baseUrl}/api/send-email`;
+        console.log('Sending email request to:', emailUrl);
+
         const emailResponse = await fetch(
-          `${baseUrl}/api/send-email`,
+          emailUrl,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -248,15 +257,25 @@ Daily format:
           }
         );
 
+        console.log('Email API response status:', emailResponse.status);
+        
         if (!emailResponse.ok) {
           const errorData = await emailResponse.json();
-          console.error('Failed to send email:', errorData);
+          console.error('Failed to send email:', {
+            status: emailResponse.status,
+            error: errorData,
+            url: emailUrl
+          });
           // Don't throw error - we still want to return the plan in the app
         } else {
-          console.log('Email sent successfully');
+          const responseData = await emailResponse.json();
+          console.log('Email sent successfully:', responseData);
         }
       } catch (emailError) {
-        console.error('Error sending email:', emailError);
+        console.error('Error in email sending process:', {
+          error: emailError instanceof Error ? emailError.message : 'Unknown error',
+          stack: emailError instanceof Error ? emailError.stack : undefined
+        });
         // Don't throw error - we still want to return the plan in the app
       }
     }
