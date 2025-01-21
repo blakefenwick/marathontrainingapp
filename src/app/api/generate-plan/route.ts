@@ -8,8 +8,8 @@ export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-// Version check - v1.2.7 (Performance Optimization)
-console.log('Running Edge Runtime version - v1.2.7');
+// Version check - v1.3.3 (Resend Email Integration)
+console.log('Running Edge Runtime version - v1.3.3');
 
 // Validate environment variables
 const requiredEnvVars = {
