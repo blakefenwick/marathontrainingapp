@@ -17,48 +17,69 @@ export default function MarathonForm() {
     },
     currentMileage: ''
   });
+  
   const [requestId, setRequestId] = useState<string | null>(null);
-  const [status, setStatus] = useState<string>('');
-  const [plan, setPlan] = useState<string>('');
+  const [status, setStatus] = useState<'initialized' | 'in_progress' | 'completed' | 'error'>('initialized');
+  const [currentWeek, setCurrentWeek] = useState(0);
+  const [totalWeeks, setTotalWeeks] = useState(0);
+  const [weeks, setWeeks] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  // Poll for status updates
+  // Poll for status updates and generate weeks
   useEffect(() => {
     if (!requestId) return;
 
     const pollInterval = setInterval(async () => {
       try {
-        console.log('Polling for status update...', requestId);
+        // Check current status
         const response = await fetch(`/api/generate-plan?requestId=${requestId}`);
-        console.log('Status response:', response.status);
-        
         if (!response.ok) {
           const errorData = await response.json();
-          console.error('Status check failed:', errorData);
-          throw new Error('Failed to check status');
+          throw new Error(errorData.error || 'Failed to check status');
         }
         
         const data = await response.json();
-        console.log('Status data:', data);
         setStatus(data.status);
-        
-        if (data.status === 'completed') {
-          console.log('Plan generation completed');
-          setPlan(data.plan);
+        setCurrentWeek(data.currentWeek);
+        setTotalWeeks(data.totalWeeks);
+        setWeeks(data.weeks || {});
+
+        // If we're in progress and not currently generating a week, start the next one
+        if (data.status === 'in_progress' && data.currentWeek < data.totalWeeks) {
+          const nextWeek = (data.currentWeek || 0) + 1;
+          try {
+            const weekResponse = await fetch('/api/generate-plan', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ requestId, weekNumber: nextWeek })
+            });
+
+            if (!weekResponse.ok) {
+              const weekErrorData = await weekResponse.json();
+              throw new Error(weekErrorData.error || 'Failed to generate week');
+            }
+
+            const weekData = await weekResponse.json();
+            setWeeks(prev => ({
+              ...prev,
+              [nextWeek]: weekData.weekPlan
+            }));
+          } catch (weekError) {
+            console.error('Error generating week:', weekError);
+          }
+        }
+
+        // If completed or error, stop polling
+        if (data.status === 'completed' || data.status === 'error') {
           clearInterval(pollInterval);
           setIsLoading(false);
-        } else if (data.status === 'error') {
-          console.error('Plan generation failed:', data.error);
-          setError(data.error || 'Failed to generate plan. Please try again.');
-          clearInterval(pollInterval);
-          setIsLoading(false);
-        } else if (data.status === 'processing') {
-          console.log('Plan generation in progress:', data.completedWeeks ? `Week ${data.completedWeeks}` : 'Starting');
-          setPlan(data.plan || '');
         }
       } catch (error) {
         console.error('Error checking status:', error);
+        setError(error instanceof Error ? error.message : 'Failed to check status');
+        clearInterval(pollInterval);
+        setIsLoading(false);
       }
     }, 5000); // Poll every 5 seconds
 
@@ -69,11 +90,12 @@ export default function MarathonForm() {
     e.preventDefault();
     setIsLoading(true);
     setError('');
-    setPlan('');
+    setWeeks({});
     setRequestId(null);
+    setCurrentWeek(0);
+    setTotalWeeks(0);
     
     try {
-      console.log('Submitting form data:', formData);
       const response = await fetch('/api/generate-plan', {
         method: 'POST',
         headers: {
@@ -82,17 +104,15 @@ export default function MarathonForm() {
         body: JSON.stringify(formData),
       });
       
-      console.log('Form submission response:', response.status);
       if (!response.ok) {
         const errorData = await response.json();
-        console.error('Form submission failed:', errorData);
         throw new Error(errorData.error || 'Failed to generate plan');
       }
       
       const data = await response.json();
-      console.log('Form submission successful:', data);
       setRequestId(data.requestId);
-      setStatus('processing');
+      setTotalWeeks(data.totalWeeks);
+      setStatus('initialized');
       
     } catch (error) {
       console.error('Form submission error:', error);
@@ -100,6 +120,9 @@ export default function MarathonForm() {
       setIsLoading(false);
     }
   };
+
+  // Calculate progress percentage
+  const progress = totalWeeks > 0 ? (currentWeek / totalWeeks) * 100 : 0;
 
   return (
     <>
@@ -218,25 +241,47 @@ export default function MarathonForm() {
         {error && (
           <div className="text-center mt-4">
             <p className="text-red-500 text-sm">{error}</p>
-            <p className="text-gray-300 text-xs mt-1">Check the browser console for detailed error information.</p>
           </div>
         )}
 
-        {status === 'processing' && (
-          <div className="text-center mt-4">
-            <p className="text-green-500 text-sm mb-2">
-              Generating your training plan...
-            </p>
-            <p className="text-gray-300 text-sm">
-              We&apos;ll email it to {formData.email} when it&apos;s ready. You can also view it here in the app.
-            </p>
+        {status !== 'initialized' && (
+          <div className="mt-4">
+            <div className="relative pt-1">
+              <div className="flex mb-2 items-center justify-between">
+                <div>
+                  <span className="text-xs font-semibold inline-block py-1 px-2 uppercase rounded-full text-blue-600 bg-blue-200">
+                    Progress
+                  </span>
+                </div>
+                <div className="text-right">
+                  <span className="text-xs font-semibold inline-block text-blue-600">
+                    {Math.round(progress)}%
+                  </span>
+                </div>
+              </div>
+              <div className="overflow-hidden h-2 mb-4 text-xs flex rounded bg-blue-200">
+                <div
+                  style={{ width: `${progress}%` }}
+                  className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-blue-500 transition-all duration-500"
+                />
+              </div>
+              <p className="text-center text-sm text-gray-300">
+                {status === 'completed'
+                  ? 'Plan generation complete!'
+                  : `Generating Week ${currentWeek + 1} of ${totalWeeks}`}
+              </p>
+            </div>
           </div>
         )}
       </form>
 
-      {plan && (
+      {Object.entries(weeks).length > 0 && (
         <div className="space-y-4">
-          <TrainingPlan plan={plan} />
+          {Object.entries(weeks)
+            .sort(([a], [b]) => parseInt(a) - parseInt(b))
+            .map(([week, plan]) => (
+              <TrainingPlan key={week} plan={plan} />
+            ))}
         </div>
       )}
     </>
