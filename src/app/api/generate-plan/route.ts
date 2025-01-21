@@ -254,11 +254,46 @@ ${Array.from({ length: differenceInDays(lastTrainingDay, startDate) + 1 }).map((
   }
 }
 
-// Get current status
+// Add Redis connection check
+async function checkRedisConnection() {
+  try {
+    const testKey = 'test-connection';
+    await redis.set(testKey, 'test-value', { ex: 60 });
+    const testValue = await redis.get(testKey);
+    await redis.del(testKey);
+    return testValue === 'test-value';
+  } catch (error) {
+    console.error('Redis connection test failed:', error);
+    return false;
+  }
+}
+
+// Update GET handler
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
     const requestId = url.searchParams.get('requestId');
+
+    // Log Redis configuration
+    console.log('Redis Configuration:', {
+      hasUrl: !!process.env.UPSTASH_REDIS_REST_URL,
+      hasToken: !!process.env.UPSTASH_REDIS_REST_TOKEN,
+      url: process.env.UPSTASH_REDIS_REST_URL?.substring(0, 20) + '...',
+    });
+
+    // Test Redis connection
+    const isConnected = await checkRedisConnection();
+    console.log('Redis connection test:', isConnected ? 'Success' : 'Failed');
+
+    if (!isConnected) {
+      return NextResponse.json(
+        { 
+          error: 'Database connection failed',
+          details: 'Unable to connect to Redis'
+        },
+        { status: 500 }
+      );
+    }
 
     if (!requestId) {
       console.error('Status check failed: No requestId provided');
@@ -271,8 +306,12 @@ export async function GET(req: Request) {
     console.log('Checking status for requestId:', requestId);
 
     try {
+      // Try to get the data
       const data = await redis.get<string>(`request:${requestId}`);
-      console.log('Raw Redis response:', data); // Log raw data
+      
+      // Log the raw response
+      console.log('Raw Redis response type:', typeof data);
+      console.log('Raw Redis response:', data);
       
       if (!data) {
         console.error('Status check failed: Request not found for ID:', requestId);
@@ -283,8 +322,19 @@ export async function GET(req: Request) {
       }
 
       try {
+        // Try to parse the data
         const parsedData = JSON.parse(data);
-        console.log('Parsed data:', parsedData); // Log parsed data
+        console.log('Successfully parsed data type:', typeof parsedData);
+        console.log('Parsed data structure:', {
+          hasStatus: typeof parsedData?.status === 'string',
+          statusValue: parsedData?.status,
+          hasEmail: typeof parsedData?.email === 'string',
+          hasRaceDate: typeof parsedData?.raceDate === 'string',
+          hasGoalTime: typeof parsedData?.goalTime === 'object',
+          hasMileage: typeof parsedData?.currentMileage === 'string',
+          hasWeeks: typeof parsedData?.weeks === 'object',
+          keys: Object.keys(parsedData || {})
+        });
 
         if (!isValidPlanState(parsedData)) {
           console.error('Invalid state structure:', parsedData);
@@ -298,7 +348,8 @@ export async function GET(req: Request) {
                 hasRaceDate: typeof parsedData?.raceDate === 'string',
                 hasGoalTime: typeof parsedData?.goalTime === 'object',
                 hasMileage: typeof parsedData?.currentMileage === 'string',
-                hasWeeks: typeof parsedData?.weeks === 'object'
+                hasWeeks: typeof parsedData?.weeks === 'object',
+                actualKeys: Object.keys(parsedData || {})
               }
             },
             { status: 500 }
@@ -306,13 +357,6 @@ export async function GET(req: Request) {
         }
 
         const state = parsedData;
-        console.log('Validated state:', {
-          status: state.status,
-          currentWeek: state.currentWeek,
-          totalWeeks: state.totalWeeks,
-          hasWeeks: Object.keys(state.weeks).length > 0
-        });
-
         return NextResponse.json({
           status: state.status,
           currentWeek: state.currentWeek,
@@ -329,7 +373,8 @@ export async function GET(req: Request) {
             details: {
               parseError: parseError instanceof Error ? parseError.message : 'Unknown parse error',
               rawDataLength: data.length,
-              rawDataPreview: data.slice(0, 100) + '...' // Show first 100 chars
+              rawDataPreview: data.slice(0, 100) + '...',
+              rawDataType: typeof data
             }
           },
           { status: 500 }
