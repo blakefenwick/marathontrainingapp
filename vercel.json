@@ -1,9 +1,6 @@
 {
-  "buildCommand": "next build",
-  "devCommand": "next dev",
-  "installCommand": "npm install",
+  "version": 2,
   "framework": "nextjs",
-  "outputDirectory": ".next",
   "functions": {
     "src/app/api/**/*": {
       "maxDuration": 120
