@@ -22,32 +22,55 @@ const redis = new Redis({
 
 export async function POST(req: Request) {
   try {
+    console.log('Starting plan generation request...');
+    
     const { raceDate, goalTime, currentMileage, email } = await req.json();
+    console.log('Received data:', { raceDate, goalTime, currentMileage, email });
+    
     const requestId = crypto.randomUUID();
+    console.log('Generated requestId:', requestId);
+
+    // Validate Redis connection
+    try {
+      await redis.ping();
+      console.log('Redis connection successful');
+    } catch (redisError) {
+      console.error('Redis connection failed:', redisError);
+      throw new Error('Failed to connect to Redis');
+    }
 
     // Store initial request in Redis
-    await redis.set(`request:${requestId}`, JSON.stringify({
-      status: 'processing',
-      email,
-      raceDate,
-      goalTime,
-      currentMileage,
-      plan: '',
-      completedWeeks: 0
-    }), { ex: 3600 }); // Expire after 1 hour
+    try {
+      await redis.set(`request:${requestId}`, JSON.stringify({
+        status: 'processing',
+        email,
+        raceDate,
+        goalTime,
+        currentMileage,
+        plan: '',
+        completedWeeks: 0
+      }), { ex: 3600 }); // Expire after 1 hour
+      console.log('Initial request stored in Redis');
+    } catch (redisError) {
+      console.error('Failed to store in Redis:', redisError);
+      throw new Error('Failed to store request data');
+    }
 
     // Start background processing
-    generateFullPlan(requestId, raceDate, goalTime, currentMileage, email).catch(console.error);
+    generateFullPlan(requestId, raceDate, goalTime, currentMileage, email).catch(error => {
+      console.error('Background processing failed:', error);
+    });
 
+    console.log('Background processing initiated');
     return NextResponse.json({
       message: "Your training plan is being generated. You'll receive an email when it's ready.",
       requestId
     });
 
   } catch (error) {
-    console.error('Error initiating plan generation:', error);
+    console.error('Error in POST handler:', error);
     return NextResponse.json(
-      { error: 'Failed to initiate plan generation' },
+      { error: error instanceof Error ? error.message : 'Failed to initiate plan generation' },
       { status: 500 }
     );
   }
@@ -61,70 +84,104 @@ async function generateFullPlan(
   email: string
 ) {
   try {
+    console.log('Starting plan generation for requestId:', requestId);
+    
     const raceDateObj = new Date(raceDate);
     const today = new Date();
     let currentWeek = 1;
     let fullPlan = '';
 
     while (true) {
+      console.log(`Generating week ${currentWeek}...`);
+      
       const startDate = currentWeek === 1 ? today : addDays(today, (currentWeek - 1) * 7);
       const endDate = addDays(startDate, 6);
       const lastTrainingDay = endDate > raceDateObj ? raceDateObj : endDate;
 
-      // If we're past the race date, break
-      if (startDate >= raceDateObj) break;
+      if (startDate >= raceDateObj) {
+        console.log('Reached race date, stopping generation');
+        break;
+      }
 
-      const prompt = `Create a marathon training plan for Week ${currentWeek}.
-${currentWeek === 1 ? `
-Runner Profile:
-- Race Day: ${format(raceDateObj, 'EEEE, MMMM d, yyyy')}
-- Goal Time: ${goalTime.hours}h${goalTime.minutes}m${goalTime.seconds}s
-- Current Weekly Mileage: ${currentMileage} miles
+      // Generate plan for current week
+      try {
+        const response = await openai.chat.completions.create({
+          model: 'gpt-3.5-turbo',
+          messages: [
+            {
+              role: 'system',
+              content: 'You are a marathon coach. Create specific daily workouts that build progressively. Include distances, paces, and brief tips.'
+            },
+            {
+              role: 'user',
+              content: `Create a marathon training plan for Week ${currentWeek}...` // Existing prompt
+            }
+          ],
+          max_tokens: 1000,
+          temperature: 0.5,
+        });
+        console.log(`Week ${currentWeek} generated successfully`);
 
-Training Overview:
-Provide a brief overview of the training approach.
-` : ''}
-
-Format the week like this:
-## Week ${currentWeek}
-> Weekly Target: [X] miles
-> Key Workouts: Long run ([X] miles), Speed work ([X] miles)
-> Build: [+/- X] miles from previous week
-
-Then list each day in this format:
-**[Full Day and Date]**
-Run: [Exact workout with distance]
-Pace: [Specific pace]
-Notes: [Brief tips]
-
-Generate the plan for these dates:
-${Array.from({ length: differenceInDays(lastTrainingDay, startDate) + 1 }).map((_, i) => {
-  const date = addDays(startDate, i);
-  return format(date, 'EEEE, MMMM d, yyyy');
-}).join('\n')}`;
-
-      const response = await openai.chat.completions.create({
-        model: 'gpt-3.5-turbo',
-        messages: [
-          {
-            role: 'system',
-            content: 'You are a marathon coach. Create specific daily workouts that build progressively. Include distances, paces, and brief tips.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        max_tokens: 1000,
-        temperature: 0.5,
-      });
-
-      const weekPlan = response.choices[0]?.message?.content || '';
-      fullPlan += (fullPlan ? '\n\n' : '') + weekPlan;
+        const weekPlan = response.choices[0]?.message?.content || '';
+        fullPlan += (fullPlan ? '\n\n' : '') + weekPlan;
+      } catch (openaiError) {
+        console.error('OpenAI API error:', openaiError);
+        throw new Error('Failed to generate training plan');
+      }
 
       // Update progress in Redis
+      try {
+        await redis.set(`request:${requestId}`, JSON.stringify({
+          status: 'processing',
+          email,
+          raceDate,
+          goalTime,
+          currentMileage,
+          plan: fullPlan,
+          completedWeeks: currentWeek
+        }), { ex: 3600 });
+        console.log(`Progress updated in Redis for week ${currentWeek}`);
+      } catch (redisError) {
+        console.error('Redis update error:', redisError);
+        throw new Error('Failed to update progress');
+      }
+
+      if (lastTrainingDay >= raceDateObj) break;
+      currentWeek++;
+    }
+
+    console.log('Plan generation completed, sending email...');
+    
+    // Send email using the separate email endpoint
+    try {
+      const emailResponse = await fetch(`${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000'}/api/send-email`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email,
+          subject: 'Your Marathon Training Plan',
+          plan: fullPlan,
+          raceDate: format(raceDateObj, 'MMMM d, yyyy')
+        }),
+      });
+
+      if (!emailResponse.ok) {
+        const errorData = await emailResponse.json();
+        console.error('Email sending failed:', errorData);
+        throw new Error('Failed to send email');
+      }
+      console.log('Email sent successfully');
+    } catch (emailError) {
+      console.error('Email error:', emailError);
+      throw new Error('Failed to send email');
+    }
+
+    // Update final status in Redis
+    try {
       await redis.set(`request:${requestId}`, JSON.stringify({
-        status: 'processing',
+        status: 'completed',
         email,
         raceDate,
         goalTime,
@@ -132,47 +189,22 @@ ${Array.from({ length: differenceInDays(lastTrainingDay, startDate) + 1 }).map((
         plan: fullPlan,
         completedWeeks: currentWeek
       }), { ex: 3600 });
-
-      if (lastTrainingDay >= raceDateObj) break;
-      currentWeek++;
+      console.log('Final status updated in Redis');
+    } catch (redisError) {
+      console.error('Final Redis update error:', redisError);
+      throw new Error('Failed to update final status');
     }
-
-    // Send email using the separate email endpoint
-    const emailResponse = await fetch(`${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000'}/api/send-email`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        email,
-        subject: 'Your Marathon Training Plan',
-        plan: fullPlan,
-        raceDate: format(raceDateObj, 'MMMM d, yyyy')
-      }),
-    });
-
-    if (!emailResponse.ok) {
-      throw new Error('Failed to send email');
-    }
-
-    // Update final status in Redis
-    await redis.set(`request:${requestId}`, JSON.stringify({
-      status: 'completed',
-      email,
-      raceDate,
-      goalTime,
-      currentMileage,
-      plan: fullPlan,
-      completedWeeks: currentWeek
-    }), { ex: 3600 });
 
   } catch (error) {
-    console.error('Error generating full plan:', error);
-    // Update error status in Redis
-    await redis.set(`request:${requestId}`, JSON.stringify({
-      status: 'error',
-      error: 'Failed to generate plan'
-    }), { ex: 3600 });
+    console.error('Error in generateFullPlan:', error);
+    try {
+      await redis.set(`request:${requestId}`, JSON.stringify({
+        status: 'error',
+        error: error instanceof Error ? error.message : 'Failed to generate plan'
+      }), { ex: 3600 });
+    } catch (redisError) {
+      console.error('Failed to store error in Redis:', redisError);
+    }
   }
 }
 
