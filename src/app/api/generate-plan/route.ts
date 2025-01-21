@@ -255,7 +255,8 @@ Daily format:
     clearTimeout(timeout);
     console.error('Error generating week:', error);
     
-    if (error.name === 'AbortError') {
+    // Type guard for AbortError
+    if (error && typeof error === 'object' && 'name' in error && error.name === 'AbortError') {
       return NextResponse.json(
         { error: 'Generation timeout - please try again' },
         { status: 408 }
