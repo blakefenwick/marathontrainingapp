@@ -14,11 +14,58 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// Initialize Redis client
-const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL!,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-});
+// Initialize Redis client or use in-memory storage for local development
+let redis: Redis | null = null;
+const inMemoryStore = new Map<string, string>();
+
+try {
+  if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
+    redis = new Redis({
+      url: process.env.UPSTASH_REDIS_REST_URL,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN,
+    });
+    console.log('Redis initialized');
+  } else {
+    console.log('Using in-memory storage for local development');
+  }
+} catch (error) {
+  console.error('Failed to initialize Redis:', error);
+  console.log('Falling back to in-memory storage');
+}
+
+// Helper function to handle storage operations
+async function storage(operation: 'get' | 'set', key: string, value?: any, options?: { ex: number }) {
+  try {
+    if (redis) {
+      if (operation === 'get') {
+        return await redis.get(key);
+      } else {
+        return await redis.set(key, value, options);
+      }
+    } else {
+      if (operation === 'get') {
+        return inMemoryStore.get(key);
+      } else {
+        inMemoryStore.set(key, value);
+        if (options?.ex) {
+          setTimeout(() => inMemoryStore.delete(key), options.ex * 1000);
+        }
+        return 'OK';
+      }
+    }
+  } catch (error) {
+    console.error(`Storage operation failed (${operation}):`, error);
+    if (operation === 'get') {
+      return inMemoryStore.get(key);
+    } else {
+      inMemoryStore.set(key, value);
+      if (options?.ex) {
+        setTimeout(() => inMemoryStore.delete(key), options.ex * 1000);
+      }
+      return 'OK';
+    }
+  }
+}
 
 export async function POST(req: Request) {
   try {
@@ -30,31 +77,16 @@ export async function POST(req: Request) {
     const requestId = crypto.randomUUID();
     console.log('Generated requestId:', requestId);
 
-    // Validate Redis connection
-    try {
-      await redis.ping();
-      console.log('Redis connection successful');
-    } catch (redisError) {
-      console.error('Redis connection failed:', redisError);
-      throw new Error('Failed to connect to Redis');
-    }
-
-    // Store initial request in Redis
-    try {
-      await redis.set(`request:${requestId}`, JSON.stringify({
-        status: 'processing',
-        email,
-        raceDate,
-        goalTime,
-        currentMileage,
-        plan: '',
-        completedWeeks: 0
-      }), { ex: 3600 }); // Expire after 1 hour
-      console.log('Initial request stored in Redis');
-    } catch (redisError) {
-      console.error('Failed to store in Redis:', redisError);
-      throw new Error('Failed to store request data');
-    }
+    // Store initial request
+    await storage('set', `request:${requestId}`, JSON.stringify({
+      status: 'processing',
+      email,
+      raceDate,
+      goalTime,
+      currentMileage,
+      plan: '',
+      completedWeeks: 0
+    }), { ex: 3600 });
 
     // Start background processing
     generateFullPlan(requestId, raceDate, goalTime, currentMileage, email).catch(error => {
@@ -158,22 +190,16 @@ ${Array.from({ length: differenceInDays(lastTrainingDay, startDate) + 1 }).map((
         throw new Error('Failed to generate training plan');
       }
 
-      // Update progress in Redis
-      try {
-        await redis.set(`request:${requestId}`, JSON.stringify({
-          status: 'processing',
-          email,
-          raceDate,
-          goalTime,
-          currentMileage,
-          plan: fullPlan,
-          completedWeeks: currentWeek
-        }), { ex: 3600 });
-        console.log(`Progress updated in Redis for week ${currentWeek}`);
-      } catch (redisError) {
-        console.error('Redis update error:', redisError);
-        throw new Error('Failed to update progress');
-      }
+      // Update progress
+      await storage('set', `request:${requestId}`, JSON.stringify({
+        status: 'processing',
+        email,
+        raceDate,
+        goalTime,
+        currentMileage,
+        plan: fullPlan,
+        completedWeeks: currentWeek
+      }), { ex: 3600 });
 
       if (lastTrainingDay >= raceDateObj) break;
       currentWeek++;
@@ -207,33 +233,23 @@ ${Array.from({ length: differenceInDays(lastTrainingDay, startDate) + 1 }).map((
       throw new Error('Failed to send email');
     }
 
-    // Update final status in Redis
-    try {
-      await redis.set(`request:${requestId}`, JSON.stringify({
-        status: 'completed',
-        email,
-        raceDate,
-        goalTime,
-        currentMileage,
-        plan: fullPlan,
-        completedWeeks: currentWeek
-      }), { ex: 3600 });
-      console.log('Final status updated in Redis');
-    } catch (redisError) {
-      console.error('Final Redis update error:', redisError);
-      throw new Error('Failed to update final status');
-    }
+    // Update final status
+    await storage('set', `request:${requestId}`, JSON.stringify({
+      status: 'completed',
+      email,
+      raceDate,
+      goalTime,
+      currentMileage,
+      plan: fullPlan,
+      completedWeeks: currentWeek
+    }), { ex: 3600 });
 
   } catch (error) {
     console.error('Error in generateFullPlan:', error);
-    try {
-      await redis.set(`request:${requestId}`, JSON.stringify({
-        status: 'error',
-        error: error instanceof Error ? error.message : 'Failed to generate plan'
-      }), { ex: 3600 });
-    } catch (redisError) {
-      console.error('Failed to store error in Redis:', redisError);
-    }
+    await storage('set', `request:${requestId}`, JSON.stringify({
+      status: 'error',
+      error: error instanceof Error ? error.message : 'Failed to generate plan'
+    }), { ex: 3600 });
   }
 }
 
@@ -250,7 +266,7 @@ export async function GET(req: Request) {
       );
     }
 
-    const data = await redis.get<string>(`request:${requestId}`);
+    const data = await storage('get', `request:${requestId}`);
     if (!data) {
       return NextResponse.json(
         { error: 'Request not found' },
