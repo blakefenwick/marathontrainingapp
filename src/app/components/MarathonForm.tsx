@@ -1,6 +1,6 @@
 'use client';
 
-// Version 1.6.4 - Fix all unescaped apostrophes
+// Version 1.6.6 - Fix all unescaped apostrophes
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import TrainingPlan from './TrainingPlan';
