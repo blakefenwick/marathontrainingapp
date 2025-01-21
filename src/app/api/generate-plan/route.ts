@@ -2,7 +2,6 @@ import { OpenAI } from 'openai';
 import { NextResponse } from 'next/server';
 import { differenceInDays, addDays, format } from 'date-fns';
 import { Redis } from '@upstash/redis';
-import nodemailer from 'nodemailer';
 
 // Configure runtime
 export const runtime = 'edge';
@@ -19,15 +18,6 @@ const openai = new OpenAI({
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL!,
   token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-});
-
-// Initialize email transporter
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
 });
 
 export async function POST(req: Request) {
@@ -147,14 +137,23 @@ ${Array.from({ length: differenceInDays(lastTrainingDay, startDate) + 1 }).map((
       currentWeek++;
     }
 
-    // Send email with completed plan
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: email,
-      subject: 'Your Marathon Training Plan',
-      text: fullPlan,
-      html: `<pre style="font-family: monospace;">${fullPlan}</pre>`
+    // Send email using the separate email endpoint
+    const emailResponse = await fetch(`${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000'}/api/send-email`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        email,
+        subject: 'Your Marathon Training Plan',
+        plan: fullPlan,
+        raceDate: format(raceDateObj, 'MMMM d, yyyy')
+      }),
     });
+
+    if (!emailResponse.ok) {
+      throw new Error('Failed to send email');
+    }
 
     // Update final status in Redis
     await redis.set(`request:${requestId}`, JSON.stringify({
