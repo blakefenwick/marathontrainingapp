@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-// Version 1.7.0 - Remove subscriptions field from profile creation
+// Version 1.7.1 - Improve Klaviyo API error handling and response parsing
 const KLAVIYO_API_KEY = process.env.KLAVIYO_API_KEY;
 const KLAVIYO_LIST_ID = process.env.KLAVIYO_LIST_ID || 'UEyYQh';
 
@@ -14,12 +14,18 @@ if (!KLAVIYO_LIST_ID) {
 }
 
 async function createOrUpdateProfile(email: string) {
-  console.log('Creating/updating Klaviyo profile:', {
-    apiKeyConfigured: !!KLAVIYO_API_KEY,
-    email
-  });
+  console.log('Creating/updating Klaviyo profile:', email);
 
   try {
+    const payload = {
+      data: {
+        type: 'profile',
+        attributes: { email }
+      }
+    };
+
+    console.log('Request payload:', JSON.stringify(payload));
+
     const response = await fetch('https://a.klaviyo.com/api/profiles/', {
       method: 'POST',
       headers: {
@@ -27,28 +33,37 @@ async function createOrUpdateProfile(email: string) {
         'Authorization': `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
         'revision': '2023-02-22'
       },
-      body: JSON.stringify({
-        data: {
-          type: 'profile',
-          attributes: {
-            email: email
-          }
-        }
-      }),
+      body: JSON.stringify(payload)
     });
 
-    const responseData = await response.json();
-    
+    console.log('Response status:', response.status);
+    console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+
+    const responseText = await response.text();
+    console.log('Raw response from Klaviyo:', responseText);
+
+    if (!responseText) {
+      console.error('Klaviyo API returned an empty response');
+      throw new Error('Empty response from Klaviyo API');
+    }
+
+    let responseData;
+    try {
+      responseData = JSON.parse(responseText);
+    } catch (error) {
+      console.error('Failed to parse JSON response:', error);
+      throw new Error('Unexpected response format from Klaviyo API');
+    }
+
     if (!response.ok) {
       console.error('Failed to create/update profile:', {
         status: response.status,
-        statusText: response.statusText,
+        headers: Object.fromEntries(response.headers.entries()),
         error: responseData
       });
-      console.error('Full response body:', responseData); // Add full response logging
       throw new Error(responseData.errors?.[0]?.detail || 'Error creating/updating profile');
     }
-    
+
     console.log('Profile created/updated successfully:', responseData);
     return responseData.data.id;
   } catch (error) {
@@ -64,6 +79,15 @@ async function subscribeToList(profileId: string) {
   });
 
   try {
+    const payload = {
+      data: [{
+        type: 'profile',
+        id: profileId
+      }]
+    };
+
+    console.log('Request payload:', JSON.stringify(payload));
+
     const response = await fetch(`https://a.klaviyo.com/api/lists/${KLAVIYO_LIST_ID}/relationships/profiles/`, {
       method: 'POST',
       headers: {
@@ -71,20 +95,32 @@ async function subscribeToList(profileId: string) {
         'Authorization': `Klaviyo-API-Key ${KLAVIYO_API_KEY}`,
         'revision': '2023-02-22'
       },
-      body: JSON.stringify({
-        data: [{
-          type: 'profile',
-          id: profileId
-        }]
-      }),
+      body: JSON.stringify(payload)
     });
 
-    const responseData = await response.json();
+    console.log('Response status:', response.status);
+    console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+
+    const responseText = await response.text();
+    console.log('Raw response from Klaviyo:', responseText);
+
+    if (!responseText) {
+      console.error('Klaviyo API returned an empty response');
+      throw new Error('Empty response from Klaviyo API');
+    }
+
+    let responseData;
+    try {
+      responseData = JSON.parse(responseText);
+    } catch (error) {
+      console.error('Failed to parse JSON response:', error);
+      throw new Error('Unexpected response format from Klaviyo API');
+    }
 
     if (!response.ok) {
       console.error('Failed to subscribe profile to list:', {
         status: response.status,
-        statusText: response.statusText,
+        headers: Object.fromEntries(response.headers.entries()),
         error: responseData
       });
       throw new Error(responseData.errors?.[0]?.detail || 'Error subscribing profile to list');
