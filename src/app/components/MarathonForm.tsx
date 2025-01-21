@@ -18,12 +18,12 @@ export default function MarathonForm() {
   const [trainingPlan, setTrainingPlan] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [hasMore, setHasMore] = useState(false);
+  const [nextDate, setNextDate] = useState<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const generatePlan = async (startDate?: string) => {
     setIsLoading(true);
     setError('');
-    setTrainingPlan('');
     
     try {
       const response = await fetch('/api/generate-plan', {
@@ -31,29 +31,41 @@ export default function MarathonForm() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          ...formData,
+          startDate
+        }),
       });
       
       if (!response.ok) throw new Error('Failed to generate plan');
       
-      // Handle streaming response
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
+      const data = await response.json();
       
-      if (!reader) throw new Error('Failed to read response');
-      
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        
-        const text = decoder.decode(value);
-        setTrainingPlan(prev => prev + text);
+      if (startDate) {
+        setTrainingPlan(prev => prev + '\n\n' + data.plan);
+      } else {
+        setTrainingPlan(data.plan);
       }
+      
+      setHasMore(data.hasMore);
+      setNextDate(data.nextDate);
     } catch (error) {
       console.error('Error:', error);
       setError('Failed to generate training plan. Please try again.');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTrainingPlan('');
+    generatePlan();
+  };
+
+  const handleLoadMore = () => {
+    if (nextDate) {
+      generatePlan(nextDate);
     }
   };
 
@@ -158,7 +170,24 @@ export default function MarathonForm() {
         )}
       </form>
 
-      {trainingPlan && <TrainingPlan plan={trainingPlan} />}
+      {trainingPlan && (
+        <div className="space-y-4">
+          <TrainingPlan plan={trainingPlan} />
+          {hasMore && (
+            <div className="flex justify-center mt-4">
+              <button
+                onClick={handleLoadMore}
+                disabled={isLoading}
+                className={`bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                  isLoading ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
+              >
+                {isLoading ? 'Loading More...' : 'Load Next Month'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </>
   );
 } 
