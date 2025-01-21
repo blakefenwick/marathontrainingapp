@@ -46,6 +46,29 @@ function calculateTotalWeeks(startDate: Date, raceDate: Date): number {
   return Math.ceil(totalDays / 7);
 }
 
+// Add validation function
+function isValidPlanState(state: any): state is PlanState {
+  return (
+    state &&
+    typeof state === 'object' &&
+    typeof state.status === 'string' &&
+    ['initialized', 'in_progress', 'completed', 'error'].includes(state.status) &&
+    typeof state.email === 'string' &&
+    typeof state.raceDate === 'string' &&
+    state.goalTime &&
+    typeof state.goalTime === 'object' &&
+    typeof state.goalTime.hours === 'string' &&
+    typeof state.goalTime.minutes === 'string' &&
+    typeof state.goalTime.seconds === 'string' &&
+    typeof state.currentMileage === 'string' &&
+    typeof state.totalWeeks === 'number' &&
+    typeof state.currentWeek === 'number' &&
+    typeof state.weeks === 'object' &&
+    (state.error === null || typeof state.error === 'string') &&
+    typeof state.startTime === 'string'
+  );
+}
+
 export async function POST(req: Request) {
   try {
     // Validate OpenAI API key
@@ -96,16 +119,25 @@ export async function PUT(req: Request) {
     const { requestId, weekNumber } = await req.json();
     console.log('Generating week', weekNumber, 'for request', requestId);
     
-    // Get current state
     try {
       const stateStr = await redis.get<string>(`request:${requestId}`);
+      console.log('Raw Redis response for PUT:', stateStr); // Log raw data
+      
       if (!stateStr) {
         console.error('Week generation failed: Request not found for ID:', requestId);
         throw new Error('Request not found');
       }
       
       try {
-        const state = JSON.parse(stateStr) as PlanState;
+        const parsedData = JSON.parse(stateStr);
+        console.log('Parsed data for PUT:', parsedData); // Log parsed data
+
+        if (!isValidPlanState(parsedData)) {
+          console.error('Invalid state structure in PUT:', parsedData);
+          throw new Error('Invalid state data structure');
+        }
+
+        const state = parsedData;
         const raceDateObj = new Date(state.raceDate);
         const today = new Date();
         
@@ -202,12 +234,13 @@ ${Array.from({ length: differenceInDays(lastTrainingDay, startDate) + 1 }).map((
           totalWeeks: state.totalWeeks
         });
       } catch (parseError) {
-        console.error('Failed to parse state data:', parseError);
-        throw new Error('Invalid state data');
+        console.error('Failed to parse state data in PUT:', parseError);
+        console.error('Raw data that failed to parse in PUT:', stateStr);
+        throw new Error(`Invalid state data: ${parseError instanceof Error ? parseError.message : 'Unknown parse error'}`);
       }
     } catch (redisError) {
-      console.error('Redis error:', redisError);
-      throw new Error('Database error');
+      console.error('Redis error in PUT:', redisError);
+      throw new Error(`Database error: ${redisError instanceof Error ? redisError.message : 'Unknown Redis error'}`);
     }
   } catch (error) {
     console.error('Error generating week:', error);
@@ -239,7 +272,7 @@ export async function GET(req: Request) {
 
     try {
       const data = await redis.get<string>(`request:${requestId}`);
-      console.log('Redis response:', data ? 'Data found' : 'No data found');
+      console.log('Raw Redis response:', data); // Log raw data
       
       if (!data) {
         console.error('Status check failed: Request not found for ID:', requestId);
@@ -250,8 +283,30 @@ export async function GET(req: Request) {
       }
 
       try {
-        const state = JSON.parse(data) as PlanState;
-        console.log('Current state:', {
+        const parsedData = JSON.parse(data);
+        console.log('Parsed data:', parsedData); // Log parsed data
+
+        if (!isValidPlanState(parsedData)) {
+          console.error('Invalid state structure:', parsedData);
+          return NextResponse.json(
+            { 
+              error: 'Invalid state data structure',
+              details: {
+                hasStatus: typeof parsedData?.status === 'string',
+                statusValue: parsedData?.status,
+                hasEmail: typeof parsedData?.email === 'string',
+                hasRaceDate: typeof parsedData?.raceDate === 'string',
+                hasGoalTime: typeof parsedData?.goalTime === 'object',
+                hasMileage: typeof parsedData?.currentMileage === 'string',
+                hasWeeks: typeof parsedData?.weeks === 'object'
+              }
+            },
+            { status: 500 }
+          );
+        }
+
+        const state = parsedData;
+        console.log('Validated state:', {
           status: state.status,
           currentWeek: state.currentWeek,
           totalWeeks: state.totalWeeks,
@@ -267,22 +322,36 @@ export async function GET(req: Request) {
         });
       } catch (parseError) {
         console.error('Failed to parse state data:', parseError);
+        console.error('Raw data that failed to parse:', data);
         return NextResponse.json(
-          { error: 'Invalid state data' },
+          { 
+            error: 'Invalid state data',
+            details: {
+              parseError: parseError instanceof Error ? parseError.message : 'Unknown parse error',
+              rawDataLength: data.length,
+              rawDataPreview: data.slice(0, 100) + '...' // Show first 100 chars
+            }
+          },
           { status: 500 }
         );
       }
     } catch (redisError) {
       console.error('Redis error:', redisError);
       return NextResponse.json(
-        { error: 'Database error' },
+        { 
+          error: 'Database error',
+          details: redisError instanceof Error ? redisError.message : 'Unknown Redis error'
+        },
         { status: 500 }
       );
     }
   } catch (error) {
     console.error('Error in GET handler:', error);
     return NextResponse.json(
-      { error: 'Failed to check status', details: error instanceof Error ? error.message : 'Unknown error' },
+      { 
+        error: 'Failed to check status', 
+        details: error instanceof Error ? error.message : 'Unknown error'
+      },
       { status: 500 }
     );
   }
