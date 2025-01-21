@@ -226,24 +226,23 @@ Daily format:
         .map(([_, plan]) => plan)
         .join('\n\n');
 
-      // Construct the email API URL with absolute URL
-      const baseUrl = process.env.VERCEL_URL 
-        ? `https://${process.env.VERCEL_URL}` 
-        : 'https://marathontrainingapp-12125.vercel.app';
-
       console.log('Email sending process started...', {
-        baseUrl,
         recipientEmail: state.email,
         planLength: fullPlan.length,
-        raceDate: format(raceDateObj, 'MMMM d, yyyy')
+        raceDate: format(raceDateObj, 'MMMM d, yyyy'),
+        resendApiKeySet: !!process.env.RESEND_API_KEY
       });
 
       try {
+        if (!process.env.RESEND_API_KEY) {
+          throw new Error('RESEND_API_KEY is not configured');
+        }
+
         // Send email directly using Resend
         const resend = new Resend(process.env.RESEND_API_KEY);
-        console.log('Sending email using Resend directly...');
+        console.log('Initializing email send to:', state.email);
 
-        const data = await resend.emails.send({
+        const emailData = {
           from: 'Marathon Training Plan <onboarding@resend.dev>',
           to: state.email,
           subject: 'Your Marathon Training Plan is Ready! 🏃‍♂️',
@@ -259,7 +258,15 @@ Daily format:
               </p>
             </div>
           `
+        };
+
+        console.log('Sending email with data:', {
+          to: emailData.to,
+          from: emailData.from,
+          subject: emailData.subject
         });
+
+        const data = await resend.emails.send(emailData);
 
         console.log('Email sent successfully:', {
           data,
@@ -269,7 +276,8 @@ Daily format:
         console.error('Error in email sending process:', {
           error: emailError instanceof Error ? emailError.message : 'Unknown error',
           stack: emailError instanceof Error ? emailError.stack : undefined,
-          recipientEmail: state.email
+          recipientEmail: state.email,
+          errorType: emailError instanceof Error ? emailError.constructor.name : typeof emailError
         });
       }
     }
