@@ -4,7 +4,10 @@ import { Resend } from 'resend';
 // Use Edge runtime for better compatibility
 export const runtime = 'edge';
 
+console.log('Initializing send-email route with Resend...');
+
 if (!process.env.RESEND_API_KEY) {
+  console.error('Missing RESEND_API_KEY environment variable');
   throw new Error('Missing RESEND_API_KEY environment variable');
 }
 
@@ -17,9 +20,13 @@ export async function POST(req: Request) {
     const { email, subject, plan, raceDate } = await req.json();
     console.log('Received email request for:', email);
 
+    // Use the email address you signed up with
+    const fromEmail = email; // This will use the same email as the recipient
+    console.log('Sending from:', fromEmail);
+
     try {
       const data = await resend.emails.send({
-        from: 'Marathon Training Plan <onboarding@resend.dev>',
+        from: fromEmail,
         to: email,
         subject: subject,
         html: `
@@ -37,13 +44,21 @@ export async function POST(req: Request) {
       });
 
       console.log('Email sent successfully:', data);
-      return NextResponse.json({ success: true });
+      return NextResponse.json({ success: true, data });
     } catch (sendError) {
       console.error('Failed to send email:', sendError);
+      console.error('Error details:', {
+        error: sendError instanceof Error ? sendError.message : 'Unknown error',
+        stack: sendError instanceof Error ? sendError.stack : undefined
+      });
       throw new Error('Failed to send email: ' + (sendError instanceof Error ? sendError.message : 'Unknown error'));
     }
   } catch (error) {
     console.error('Error in email route:', error);
+    console.error('Full error details:', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined
+    });
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to send email' },
       { status: 500 }

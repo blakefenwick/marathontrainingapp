@@ -228,9 +228,7 @@ Daily format:
       // Construct the email API URL
       const baseUrl = process.env.VERCEL_URL 
         ? `https://${process.env.VERCEL_URL}` 
-        : process.env.NODE_ENV === 'development' 
-          ? 'http://localhost:3000'
-          : 'https://marathontrainingapp-12125.vercel.app';
+        : 'https://marathontrainingapp-12125.vercel.app';
 
       console.log('Email sending process started...', {
         baseUrl,
@@ -264,19 +262,22 @@ Daily format:
           console.error('Failed to send email:', {
             status: emailResponse.status,
             error: errorData,
-            url: emailUrl
+            url: emailUrl,
+            recipientEmail: state.email
           });
-          // Don't throw error - we still want to return the plan in the app
         } else {
           const responseData = await emailResponse.json();
-          console.log('Email sent successfully:', responseData);
+          console.log('Email sent successfully:', {
+            ...responseData,
+            recipientEmail: state.email
+          });
         }
       } catch (emailError) {
         console.error('Error in email sending process:', {
           error: emailError instanceof Error ? emailError.message : 'Unknown error',
-          stack: emailError instanceof Error ? emailError.stack : undefined
+          stack: emailError instanceof Error ? emailError.stack : undefined,
+          recipientEmail: state.email
         });
-        // Don't throw error - we still want to return the plan in the app
       }
     }
 
