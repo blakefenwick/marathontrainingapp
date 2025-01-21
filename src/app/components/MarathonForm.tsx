@@ -23,6 +23,7 @@ export default function MarathonForm() {
     e.preventDefault();
     setIsLoading(true);
     setError('');
+    setTrainingPlan('');
     
     try {
       const response = await fetch('/api/generate-plan', {
@@ -35,8 +36,19 @@ export default function MarathonForm() {
       
       if (!response.ok) throw new Error('Failed to generate plan');
       
-      const data = await response.json();
-      setTrainingPlan(data.plan);
+      // Handle streaming response
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      
+      if (!reader) throw new Error('Failed to read response');
+      
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        const text = decoder.decode(value);
+        setTrainingPlan(prev => prev + text);
+      }
     } catch (error) {
       console.error('Error:', error);
       setError('Failed to generate training plan. Please try again.');

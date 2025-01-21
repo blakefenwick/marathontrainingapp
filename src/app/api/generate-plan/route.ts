@@ -1,6 +1,7 @@
 import { OpenAI } from 'openai';
 import { NextResponse } from 'next/server';
-import { differenceInDays, addDays, format, subDays, startOfWeek, endOfWeek } from 'date-fns';
+import { differenceInDays, addDays, format, subDays } from 'date-fns';
+import { StreamingTextResponse, OpenAIStream } from 'ai';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -76,13 +77,13 @@ export async function POST(req: Request) {
     const daysUntilRace = Math.max(1, differenceInDays(raceDateObj, today) + 1);
     const lastTrainingDay = subDays(raceDateObj, 1);
 
-    // Break the plan into 30-day chunks
+    // Break the plan into 14-day chunks (reduced from 30)
     const chunks = [];
     let currentStartDate = today;
     let weekNumber = 1;
 
     while (currentStartDate < lastTrainingDay) {
-      const chunkEndDate = addDays(currentStartDate, 29); // 30 days per chunk
+      const chunkEndDate = addDays(currentStartDate, 13); // 14 days per chunk
       const actualEndDate = chunkEndDate > lastTrainingDay ? lastTrainingDay : chunkEndDate;
       
       chunks.push({
@@ -97,51 +98,42 @@ export async function POST(req: Request) {
       currentStartDate = addDays(actualEndDate, 1);
     }
 
-    // Generate plan for each chunk
-    let fullPlan = '';
-    for (let i = 0; i < chunks.length; i++) {
-      const chunk = chunks[i];
-      const prompt = generatePromptForDateRange(
-        chunk.startDate,
-        chunk.endDate,
-        i === 0, // is this the first chunk?
-        format(raceDateObj, 'EEEE, MMMM d, yyyy'),
-        goalTime,
-        currentMileage,
-        daysUntilRace,
-        chunk.weekNumber
-      );
+    // Generate plan for the first chunk only
+    const firstChunk = chunks[0];
+    const prompt = generatePromptForDateRange(
+      firstChunk.startDate,
+      firstChunk.endDate,
+      true,
+      format(raceDateObj, 'EEEE, MMMM d, yyyy'),
+      goalTime,
+      currentMileage,
+      daysUntilRace,
+      firstChunk.weekNumber
+    );
 
-      const completion = await openai.chat.completions.create({
-        messages: [
-          {
-            role: "system",
-            content: "You are a marathon coach creating a training plan. Start each week with a mileage summary, then provide specific instructions for each day. Make sure daily workouts add up to weekly targets. Do not skip any days. Do not summarize."
-          },
-          {
-            role: "user",
-            content: prompt
-          }
-        ],
-        model: "gpt-4-turbo-preview",
-        temperature: 0.7,
-        max_tokens: 4000,
-        response_format: { type: "text" }
-      });
-
-      // For chunks after the first, remove any overview text before the first week header
-      let chunkContent = completion.choices[0].message.content || '';
-      if (i > 0 && chunkContent) {
-        const firstWeekIndex = chunkContent.indexOf('## Week');
-        if (firstWeekIndex > 0) {
-          chunkContent = chunkContent.substring(firstWeekIndex);
+    const response = await openai.chat.completions.create({
+      messages: [
+        {
+          role: "system",
+          content: "You are a marathon coach creating a training plan. Start each week with a mileage summary, then provide specific instructions for each day. Make sure daily workouts add up to weekly targets. Do not skip any days. Do not summarize."
+        },
+        {
+          role: "user",
+          content: prompt
         }
-      }
+      ],
+      model: "gpt-3.5-turbo",
+      temperature: 0.7,
+      max_tokens: 2000,
+      stream: true
+    });
 
-      fullPlan += (i > 0 ? '\n\n' : '') + chunkContent;
-    }
+    // Convert the response to a readable stream
+    const stream = OpenAIStream(response);
+    
+    // Return the stream
+    return new StreamingTextResponse(stream);
 
-    return NextResponse.json({ plan: fullPlan });
   } catch (error) {
     console.error('Error generating training plan:', error);
     return NextResponse.json(
