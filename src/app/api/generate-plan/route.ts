@@ -223,22 +223,39 @@ Daily format:
         .map(([_, plan]) => plan)
         .join('\n\n');
 
-      const emailResponse = await fetch(
-        `${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000'}/api/send-email`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email: state.email,
-            subject: 'Your Complete Marathon Training Plan',
-            plan: fullPlan,
-            raceDate: format(raceDateObj, 'MMMM d, yyyy')
-          }),
-        }
-      );
+      // Construct the email API URL
+      const baseUrl = process.env.VERCEL_URL 
+        ? `https://${process.env.VERCEL_URL}` 
+        : process.env.NODE_ENV === 'development' 
+          ? 'http://localhost:3000'
+          : 'https://marathontrainingapp-12125.vercel.app';
 
-      if (!emailResponse.ok) {
-        console.error('Failed to send email');
+      console.log('Sending email with plan...');
+      try {
+        const emailResponse = await fetch(
+          `${baseUrl}/api/send-email`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: state.email,
+              subject: 'Your Marathon Training Plan is Ready! 🏃‍♂️',
+              plan: fullPlan,
+              raceDate: format(raceDateObj, 'MMMM d, yyyy')
+            }),
+          }
+        );
+
+        if (!emailResponse.ok) {
+          const errorData = await emailResponse.json();
+          console.error('Failed to send email:', errorData);
+          // Don't throw error - we still want to return the plan in the app
+        } else {
+          console.log('Email sent successfully');
+        }
+      } catch (emailError) {
+        console.error('Error sending email:', emailError);
+        // Don't throw error - we still want to return the plan in the app
       }
     }
 
