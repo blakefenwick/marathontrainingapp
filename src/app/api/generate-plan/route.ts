@@ -8,8 +8,8 @@ export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-// Version check - v1.2.6 (Environment Variable Validation)
-console.log('Running Edge Runtime version - v1.2.6');
+// Version check - v1.2.7 (Performance Optimization)
+console.log('Running Edge Runtime version - v1.2.7');
 
 // Validate environment variables
 const requiredEnvVars = {
@@ -146,142 +146,124 @@ export async function POST(req: Request) {
   }
 }
 
-// Generate a specific week's plan
+// Update PUT handler
 export async function PUT(req: Request) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 25000); // 25 second timeout
+
   try {
     const { requestId, weekNumber } = await req.json();
     console.log('Generating week', weekNumber, 'for request', requestId);
     
-    try {
-      const stateStr = await redis.get<string>(`request:${requestId}`);
-      console.log('Raw Redis response for PUT:', stateStr); // Log raw data
-      
-      if (!stateStr) {
-        console.error('Week generation failed: Request not found for ID:', requestId);
-        throw new Error('Request not found');
-      }
-      
-      try {
-        const parsedData = JSON.parse(stateStr);
-        console.log('Parsed data for PUT:', parsedData); // Log parsed data
-
-        if (!isValidPlanState(parsedData)) {
-          console.error('Invalid state structure in PUT:', parsedData);
-          throw new Error('Invalid state data structure');
-        }
-
-        const state = parsedData;
-        const raceDateObj = new Date(state.raceDate);
-        const today = new Date();
-        
-        // Calculate dates for this week
-        const startDate = addDays(today, (weekNumber - 1) * 7);
-        const endDate = addDays(startDate, 6);
-        const lastTrainingDay = endDate > raceDateObj ? raceDateObj : endDate;
-
-        if (startDate >= raceDateObj) {
-          throw new Error('Week is beyond race date');
-        }
-
-        // Generate plan for this week
-        const prompt = `Create a marathon training plan for Week ${weekNumber}.
-Runner Profile:
-- Race Day: ${format(raceDateObj, 'EEEE, MMMM d, yyyy')}
-- Goal Time: ${state.goalTime.hours}h${state.goalTime.minutes}m${state.goalTime.seconds}s
-- Current Weekly Mileage: ${state.currentMileage} miles
-
-Format the week like this:
-## Week ${weekNumber}
-> Weekly Target: [X] miles
-> Key Workouts: Long run ([X] miles), Speed work ([X] miles)
-> Build: [+/- X] miles from previous week
-
-Then list each day in this format:
-**[Full Day and Date]**
-Run: [Exact workout with distance]
-Pace: [Specific pace]
-Notes: [Brief tips]
-
-Generate the plan for these dates:
-${Array.from({ length: differenceInDays(lastTrainingDay, startDate) + 1 }).map((_, i) => {
-  const date = addDays(startDate, i);
-  return format(date, 'EEEE, MMMM d, yyyy');
-}).join('\n')}`;
-
-        const response = await openai.chat.completions.create({
-          model: 'gpt-3.5-turbo',
-          messages: [
-            {
-              role: 'system',
-              content: 'You are a marathon coach. Create specific daily workouts that build progressively. Include distances, paces, and brief tips.'
-            },
-            {
-              role: 'user',
-              content: prompt
-            }
-          ],
-          max_tokens: 1000,
-          temperature: 0.5,
-        });
-
-        const weekPlan = response.choices[0]?.message?.content || '';
-        
-        // Update state with new week
-        state.weeks[weekNumber] = weekPlan;
-        state.currentWeek = weekNumber;
-        state.status = weekNumber === state.totalWeeks ? 'completed' : 'in_progress';
-        
-        // If this is the last week, send email
-        if (state.status === 'completed') {
-          const fullPlan = Object.entries(state.weeks)
-            .sort(([a], [b]) => parseInt(a) - parseInt(b))
-            .map(([_, plan]) => plan)
-            .join('\n\n');
-
-          const emailResponse = await fetch(
-            `${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000'}/api/send-email`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                email: state.email,
-                subject: 'Your Complete Marathon Training Plan',
-                plan: fullPlan,
-                raceDate: format(raceDateObj, 'MMMM d, yyyy')
-              }),
-            }
-          );
-
-          if (!emailResponse.ok) {
-            console.error('Failed to send email');
-          }
-        }
-
-        // Save updated state
-        await redis.set(`request:${requestId}`, JSON.stringify(state), { ex: 3600 });
-
-        return NextResponse.json({
-          status: state.status,
-          weekPlan,
-          currentWeek: weekNumber,
-          totalWeeks: state.totalWeeks
-        });
-      } catch (parseError) {
-        console.error('Failed to parse state data in PUT:', parseError);
-        console.error('Raw data that failed to parse in PUT:', stateStr);
-        throw new Error(`Invalid state data: ${parseError instanceof Error ? parseError.message : 'Unknown parse error'}`);
-      }
-    } catch (redisError) {
-      console.error('Redis error in PUT:', redisError);
-      throw new Error(`Database error: ${redisError instanceof Error ? redisError.message : 'Unknown Redis error'}`);
+    const stateStr = await redis.get<string>(`request:${requestId}`);
+    if (!stateStr) {
+      throw new Error('Request not found');
     }
+
+    const state = JSON.parse(stateStr);
+    if (!isValidPlanState(state)) {
+      throw new Error('Invalid state data structure');
+    }
+
+    // Update status to show which week is being generated
+    state.status = 'in_progress';
+    state.currentWeek = weekNumber;
+    await redis.set(`request:${requestId}`, JSON.stringify(state), { ex: 3600 });
+
+    const raceDateObj = new Date(state.raceDate);
+    const today = new Date();
+    const startDate = addDays(today, (weekNumber - 1) * 7);
+    const endDate = addDays(startDate, 6);
+    const lastTrainingDay = endDate > raceDateObj ? raceDateObj : endDate;
+
+    if (startDate >= raceDateObj) {
+      throw new Error('Week is beyond race date');
+    }
+
+    // Simplified prompt for faster response
+    const prompt = `Create a concise marathon training plan for Week ${weekNumber}.
+Runner: Goal ${state.goalTime.hours}h${state.goalTime.minutes}m, Current ${state.currentMileage} miles/week
+Dates: ${format(startDate, 'MMM d')} - ${format(lastTrainingDay, 'MMM d')}
+
+Format:
+## Week ${weekNumber}
+Weekly Target: [X] miles
+Key Workouts: Long run, Speed work
+
+Daily format:
+[Day]: [Distance] miles - [Type] - [Pace]`;
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-3.5-turbo',
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a marathon coach. Create specific daily workouts that build progressively.'
+        },
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      max_tokens: 500, // Reduced from 1000
+      temperature: 0.3, // Reduced from 0.5 for more consistent responses
+    }, { signal: controller.signal });
+
+    clearTimeout(timeout);
+
+    const weekPlan = response.choices[0]?.message?.content || '';
+    
+    // Update state with new week
+    state.weeks[weekNumber] = weekPlan;
+    state.status = weekNumber === state.totalWeeks ? 'completed' : 'in_progress';
+    
+    if (state.status === 'completed') {
+      const fullPlan = Object.entries(state.weeks)
+        .sort(([a], [b]) => parseInt(a) - parseInt(b))
+        .map(([_, plan]) => plan)
+        .join('\n\n');
+
+      const emailResponse = await fetch(
+        `${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000'}/api/send-email`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: state.email,
+            subject: 'Your Complete Marathon Training Plan',
+            plan: fullPlan,
+            raceDate: format(raceDateObj, 'MMMM d, yyyy')
+          }),
+        }
+      );
+
+      if (!emailResponse.ok) {
+        console.error('Failed to send email');
+      }
+    }
+
+    await redis.set(`request:${requestId}`, JSON.stringify(state), { ex: 3600 });
+
+    return NextResponse.json({
+      status: state.status,
+      weekPlan,
+      currentWeek: weekNumber,
+      totalWeeks: state.totalWeeks
+    });
+
   } catch (error) {
+    clearTimeout(timeout);
     console.error('Error generating week:', error);
+    
+    if (error.name === 'AbortError') {
+      return NextResponse.json(
+        { error: 'Generation timeout - please try again' },
+        { status: 408 }
+      );
+    }
+
     return NextResponse.json(
-      { 
-        error: error instanceof Error ? error.message : 'Failed to generate week',
-        details: error instanceof Error ? error.stack : undefined
-      },
+      { error: error instanceof Error ? error.message : 'Failed to generate week' },
       { status: 500 }
     );
   }
