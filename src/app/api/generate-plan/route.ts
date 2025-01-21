@@ -105,6 +105,35 @@ async function generateFullPlan(
 
       // Generate plan for current week
       try {
+        const prompt = `Create a marathon training plan for Week ${currentWeek}.
+${currentWeek === 1 ? `
+Runner Profile:
+- Race Day: ${format(raceDateObj, 'EEEE, MMMM d, yyyy')}
+- Goal Time: ${goalTime.hours}h${goalTime.minutes}m${goalTime.seconds}s
+- Current Weekly Mileage: ${currentMileage} miles
+
+Training Overview:
+Provide a brief overview of the training approach.
+` : ''}
+
+Format the week like this:
+## Week ${currentWeek}
+> Weekly Target: [X] miles
+> Key Workouts: Long run ([X] miles), Speed work ([X] miles)
+> Build: [+/- X] miles from previous week
+
+Then list each day in this format:
+**[Full Day and Date]**
+Run: [Exact workout with distance]
+Pace: [Specific pace]
+Notes: [Brief tips]
+
+Generate the plan for these dates:
+${Array.from({ length: differenceInDays(lastTrainingDay, startDate) + 1 }).map((_, i) => {
+  const date = addDays(startDate, i);
+  return format(date, 'EEEE, MMMM d, yyyy');
+}).join('\n')}`;
+
         const response = await openai.chat.completions.create({
           model: 'gpt-3.5-turbo',
           messages: [
@@ -114,7 +143,7 @@ async function generateFullPlan(
             },
             {
               role: 'user',
-              content: `Create a marathon training plan for Week ${currentWeek}...` // Existing prompt
+              content: prompt
             }
           ],
           max_tokens: 1000,
