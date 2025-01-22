@@ -207,22 +207,21 @@ export default function MarathonForm() {
   const progress = totalWeeks > 0 ? (currentWeek / totalWeeks) * 100 : 0;
 
   return (
-    <>
-      <form onSubmit={handleSubmit} className="max-w-md mx-auto space-y-6 p-6">
-        <div className="space-y-2">
-          <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+    <div className="bg-white rounded-lg shadow-xl p-6">
+      <form onSubmit={handleSubmit} className="space-y-6">
+        <div>
+          <label htmlFor="email" className="block text-white mb-2">
             Email Address
           </label>
           <input
             type="email"
             id="email"
-            name="email"
             value={formData.email}
             onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+            className="w-full px-4 py-2 rounded border border-gray-300 text-black"
             required
           />
-          <p className="mt-1 text-sm text-white-500">
+          <p className="mt-2 text-sm text-gray-300">
             Entering your email subscribes you to Veloci&apos;s email list. You can unsubscribe at any time in the future.
           </p>
         </div>
@@ -312,12 +311,10 @@ export default function MarathonForm() {
 
         <button
           type="submit"
+          className="w-full bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 disabled:opacity-50"
           disabled={isLoading}
-          className={`w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-            isLoading ? 'opacity-50 cursor-not-allowed' : ''
-          }`}
         >
-          {isLoading ? 'Generating Plan...' : 'Generate Training Plan'}
+          {isLoading ? 'Generating Plan...' : 'Generate Plan'}
         </button>
 
         {status === 'completed' && (
@@ -331,42 +328,6 @@ export default function MarathonForm() {
             </button>
           </div>
         )}
-
-        {error && (
-          <div className="text-center mt-4">
-            <p className="text-red-500 text-sm">{error}</p>
-          </div>
-        )}
-
-        {status !== 'initialized' && (
-          <div className="mt-4">
-            <div className="relative pt-1">
-              <div className="flex mb-2 items-center justify-between">
-                <div>
-                  <span className="text-xs font-semibold inline-block py-1 px-2 uppercase rounded-full text-blue-600 bg-blue-200">
-                    Progress
-                  </span>
-                </div>
-                <div className="text-right">
-                  <span className="text-xs font-semibold inline-block text-blue-600">
-                    {Math.round(progress)}%
-                  </span>
-                </div>
-              </div>
-              <div className="overflow-hidden h-2 mb-4 text-xs flex rounded bg-blue-200">
-                <div
-                  style={{ width: `${progress}%` }}
-                  className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-blue-500 transition-all duration-500"
-                />
-              </div>
-              <p className="text-center text-sm text-gray-300">
-                {status === 'completed'
-                  ? 'Plan generation complete!'
-                  : `Generating Week ${currentWeek + 1} of ${totalWeeks}`}
-              </p>
-            </div>
-          </div>
-        )}
       </form>
 
       {Object.entries(weeks).length > 0 && (
@@ -378,6 +339,42 @@ export default function MarathonForm() {
             ))}
         </div>
       )}
-    </>
+
+      {error && (
+        <div className="mt-4 p-4 bg-red-100 text-red-700 rounded">
+          {error}
+        </div>
+      )}
+
+      {status !== 'initialized' && (
+        <div className="mt-4">
+          <div className="relative pt-1">
+            <div className="flex mb-2 items-center justify-between">
+              <div>
+                <span className="text-xs font-semibold inline-block py-1 px-2 uppercase rounded-full text-blue-600 bg-blue-200">
+                  Progress
+                </span>
+              </div>
+              <div className="text-right">
+                <span className="text-xs font-semibold inline-block text-blue-600">
+                  {Math.round(progress)}%
+                </span>
+              </div>
+            </div>
+            <div className="overflow-hidden h-2 mb-4 text-xs flex rounded bg-blue-200">
+              <div
+                style={{ width: `${progress}%` }}
+                className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-blue-500 transition-all duration-500"
+              />
+            </div>
+            <p className="text-center text-sm text-gray-300">
+              {status === 'completed'
+                ? 'Plan generation complete!'
+                : `Generating Week ${currentWeek + 1} of ${totalWeeks}`}
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
   );
 } 

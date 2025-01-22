@@ -125,6 +125,7 @@ async function createOrUpdateProfile(email: string) {
   }
 }
 
+// Version 1.7.4 - Handle empty responses from list subscription
 async function subscribeToList(profileId: string) {
   console.log('Subscribing profile to list:', {
     listId: KLAVIYO_LIST_ID,
@@ -154,33 +155,45 @@ async function subscribeToList(profileId: string) {
     console.log('Response status:', response.status);
     console.log('Response headers:', Object.fromEntries(response.headers.entries()));
 
+    // For 204 No Content, we don't need to parse the response
+    if (response.status === 204) {
+      console.log('Profile successfully subscribed to list (204 No Content)');
+      return { success: true };
+    }
+
     const responseText = await response.text();
     console.log('Raw response from Klaviyo:', responseText);
 
-    if (!responseText) {
-      console.error('Klaviyo API returned an empty response');
-      throw new Error('Empty response from Klaviyo API');
+    // Only try to parse if we have content
+    if (responseText) {
+      try {
+        const responseData = JSON.parse(responseText);
+        if (!response.ok) {
+          console.error('Failed to subscribe profile to list:', {
+            status: response.status,
+            headers: Object.fromEntries(response.headers.entries()),
+            error: responseData
+          });
+          throw new Error(responseData.errors?.[0]?.detail || 'Error subscribing profile to list');
+        }
+        return responseData;
+      } catch (error) {
+        console.error('Failed to parse JSON response:', error);
+        throw new Error('Unexpected response format from Klaviyo API');
+      }
     }
 
-    let responseData;
-    try {
-      responseData = JSON.parse(responseText);
-    } catch (error) {
-      console.error('Failed to parse JSON response:', error);
-      throw new Error('Unexpected response format from Klaviyo API');
-    }
-
+    // If we get here with a non-204 status and no content, that's an error
     if (!response.ok) {
       console.error('Failed to subscribe profile to list:', {
         status: response.status,
-        headers: Object.fromEntries(response.headers.entries()),
-        error: responseData
+        headers: Object.fromEntries(response.headers.entries())
       });
-      throw new Error(responseData.errors?.[0]?.detail || 'Error subscribing profile to list');
+      throw new Error('Error subscribing profile to list');
     }
 
     console.log('Profile successfully subscribed to list');
-    return responseData;
+    return { success: true };
   } catch (error) {
     console.error('Error in subscribeToList:', error);
     throw error;

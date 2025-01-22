@@ -184,17 +184,20 @@ export async function PUT(req: Request) {
     }
 
     // Simplified prompt for faster response
-    const prompt = `Create a concise marathon training plan for Week ${weekNumber}.
-Runner: Goal ${state.goalTime.hours}h${state.goalTime.minutes}m, Current ${state.currentMileage} miles/week
-Dates: ${format(startDate, 'MMM d')} - ${format(lastTrainingDay, 'MMM d')}
+    const prompt = `Generate a detailed training plan for week ${weekNumber} of a ${state.totalWeeks}-week marathon training plan. The race is on ${state.raceDate}. Current weekly mileage: ${state.currentMileage} miles. Goal time: ${state.goalTime.hours}h${state.goalTime.minutes}m.
 
-Format:
-## Week ${weekNumber}
-Weekly Target: [X] miles
-Key Workouts: Long run, Speed work
+Format the response with clear line breaks between days and sections. Each day should be on a new line and should follow this format:
 
-Daily format:
-[Day]: [Distance] miles - [Type] - [Pace]`;
+Day X: [Workout Type]
+- Detailed workout description
+- Additional notes or tips
+
+For example:
+Day 1: Easy Run
+- 5 miles at an easy, conversational pace
+- Focus on maintaining good form
+
+Make sure to include rest days and vary the intensity throughout the week.`;
 
     const response = await openai.chat.completions.create({
       model: 'gpt-3.5-turbo',
