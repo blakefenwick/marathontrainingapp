@@ -207,10 +207,10 @@ export default function MarathonForm() {
   const progress = totalWeeks > 0 ? (currentWeek / totalWeeks) * 100 : 0;
 
   return (
-    <div className="bg-white rounded-lg shadow-xl p-6">
+    <div className="bg-white rounded-lg shadow p-6">
       <form onSubmit={handleSubmit} className="space-y-6">
         <div>
-          <label htmlFor="email" className="block text-white mb-2">
+          <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
             Email Address
           </label>
           <input
@@ -218,16 +218,16 @@ export default function MarathonForm() {
             id="email"
             value={formData.email}
             onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-            className="w-full px-4 py-2 rounded border border-gray-300 text-black"
+            className="w-full px-4 py-2 rounded border border-gray-300 focus:ring-blue-500 focus:border-blue-500"
             required
           />
-          <p className="mt-2 text-sm text-gray-300">
+          <p className="mt-2 text-sm text-gray-500">
             Entering your email subscribes you to Veloci&apos;s email list. You can unsubscribe at any time in the future.
           </p>
         </div>
 
         <div className="space-y-2">
-          <label htmlFor="raceDate" className="block text-sm font-medium text-white">
+          <label htmlFor="raceDate" className="block text-sm font-medium text-gray-700">
             When is your race?
           </label>
           <input
@@ -235,13 +235,13 @@ export default function MarathonForm() {
             id="raceDate"
             value={formData.raceDate}
             onChange={(e) => setFormData({ ...formData, raceDate: e.target.value })}
-            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-black p-2"
+            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
             required
           />
         </div>
 
         <div className="space-y-2">
-          <label className="block text-sm font-medium text-white">
+          <label className="block text-sm font-medium text-gray-700">
             What is your goal finish time?
           </label>
           <div className="grid grid-cols-3 gap-2">
@@ -256,7 +256,7 @@ export default function MarathonForm() {
                   ...formData,
                   goalTime: { ...formData.goalTime, hours: e.target.value }
                 })}
-                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-black p-2"
+                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                 required
               />
             </div>
@@ -271,7 +271,7 @@ export default function MarathonForm() {
                   ...formData,
                   goalTime: { ...formData.goalTime, minutes: e.target.value }
                 })}
-                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-black p-2"
+                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                 required
               />
             </div>
@@ -286,7 +286,7 @@ export default function MarathonForm() {
                   ...formData,
                   goalTime: { ...formData.goalTime, seconds: e.target.value }
                 })}
-                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-black p-2"
+                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                 required
               />
             </div>
@@ -294,7 +294,7 @@ export default function MarathonForm() {
         </div>
 
         <div className="space-y-2">
-          <label htmlFor="currentMileage" className="block text-sm font-medium text-white">
+          <label htmlFor="currentMileage" className="block text-sm font-medium text-gray-700">
             How many miles per week are you currently running?
           </label>
           <input
@@ -304,7 +304,7 @@ export default function MarathonForm() {
             step="0.1"
             value={formData.currentMileage}
             onChange={(e) => setFormData({ ...formData, currentMileage: e.target.value })}
-            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-black p-2"
+            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
             required
           />
         </div>
