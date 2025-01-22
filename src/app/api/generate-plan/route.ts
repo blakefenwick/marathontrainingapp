@@ -184,20 +184,46 @@ export async function PUT(req: Request) {
     }
 
     // Simplified prompt for faster response
-    const prompt = `Generate a detailed training plan for week ${weekNumber} of a ${state.totalWeeks}-week marathon training plan. The race is on ${state.raceDate}. Current weekly mileage: ${state.currentMileage} miles. Goal time: ${state.goalTime.hours}h${state.goalTime.minutes}m.
+    const prompt = `Generate a detailed training plan for week ${weekNumber} of a ${state.totalWeeks}-week marathon training plan. 
+Race Date: ${state.raceDate}
+Current Weekly Mileage: ${state.currentMileage} miles
+Goal Time: ${state.goalTime.hours}h${state.goalTime.minutes}m
 
-Format the response with clear line breaks between days and sections. Each day should be on a new line and should follow this format:
+Consider the following guidelines:
+1. Current Phase (based on week number):
+   - Weeks 1-2: Rest Phase (2-3 days running, easy runs)
+   - Weeks 3-5: Mileage Build Phase (gradual increase, max 10% per week)
+   - Weeks 6-${Math.max(state.totalWeeks - 3, 6)}: Peak Training Phase (higher mileage, 1-2 workouts per week)
+   - Last 3 weeks: Taper Phase (reduce mileage 10-20% per week)
 
-Day X: [Workout Type]
+2. Weekly Structure:
+   - Long Run: 60-90 seconds slower than goal marathon pace
+   - Tempo Run: Near goal marathon pace
+   - Easy Runs: 2 minutes slower than goal marathon pace
+   - Recovery Runs: Very easy pace
+   - Rest or Cross-training days as needed
+
+3. Current Fitness Level (based on weekly mileage):
+   ${Number(state.currentMileage) < 20 ? '- Beginner: Focus on building base mileage safely' :
+     Number(state.currentMileage) < 40 ? '- Intermediate: Balance mileage with quality workouts' :
+     '- Advanced: Include challenging workouts and higher mileage'}
+
+Format the response with clear line breaks between days and sections. Each day should be on a new line and follow this format:
+
+[Day, Date]: [Workout Type]
+- Distance and pace guidance
 - Detailed workout description
-- Additional notes or tips
+- Recovery and form tips
 
-For example:
-Day 1: Easy Run
-- 5 miles at an easy, conversational pace
-- Focus on maintaining good form
+Example:
+Monday: Recovery Day
+- Rest or light cross-training
+- Focus on stretching and mobility
 
-Make sure to include rest days and vary the intensity throughout the week.`;
+Tuesday: Easy Run
+- 5 miles at easy pace (2 minutes slower than goal marathon pace)
+- Keep effort conversational
+- Focus on maintaining good form`;
 
     const response = await openai.chat.completions.create({
       model: 'gpt-3.5-turbo',
