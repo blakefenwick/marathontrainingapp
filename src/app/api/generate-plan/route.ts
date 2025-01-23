@@ -173,16 +173,27 @@ export async function PUT(req: Request) {
     state.currentWeek = weekNumber;
     await redis.set(`request:${requestId}`, JSON.stringify(state), { ex: 3600 });
 
-    const raceDateObj = new Date(state.raceDate);
-    const today = new Date();
-    const weeksUntilRace = state.totalWeeks - weekNumber + 1;
-    const weekStartDate = addDays(raceDateObj, -7 * weeksUntilRace);
+    // Calculate start date (tomorrow) and week dates
+    const tomorrow = addDays(new Date(), 1);
+    const planStartDate = tomorrow;
+    const weekStartOffset = (weekNumber - 1) * 7;
+    const currentWeekStartDate = addDays(planStartDate, weekStartOffset);
 
-    if (weekStartDate >= raceDateObj) {
+    // Log date calculations for debugging
+    console.log('Date calculations:', {
+      today: new Date().toISOString(),
+      tomorrow: tomorrow.toISOString(),
+      planStartDate: planStartDate.toISOString(),
+      weekNumber,
+      weekStartOffset,
+      currentWeekStartDate: currentWeekStartDate.toISOString()
+    });
+
+    if (currentWeekStartDate >= new Date(state.raceDate)) {
       throw new Error('Week is beyond race date');
     }
 
-    // Enhanced prompt with date continuity and mileage summary
+    // Enhanced prompt with date continuity
     const prompt = `You are a marathon training plan generator. Your task is to create a complete and detailed weekly training plan for Week ${weekNumber} of ${state.totalWeeks} total weeks.
 
 Inputs:
@@ -210,9 +221,14 @@ Current Runner Level: ${
 }
 
 Additional Instructions:
-1. Generate a detailed plan for Week ${weekNumber}, using the following dates:
-   - Week starts on: ${format(weekStartDate, 'EEEE, MMMM d')}
-   - Each subsequent day should follow in sequence
+1. Generate a detailed plan for Week ${weekNumber}, starting from ${format(currentWeekStartDate, 'EEEE, MMMM d')}. Use these exact dates:
+   - ${format(currentWeekStartDate, 'EEEE')}: ${format(currentWeekStartDate, 'MMMM d')}
+   - ${format(addDays(currentWeekStartDate, 1), 'EEEE')}: ${format(addDays(currentWeekStartDate, 1), 'MMMM d')}
+   - ${format(addDays(currentWeekStartDate, 2), 'EEEE')}: ${format(addDays(currentWeekStartDate, 2), 'MMMM d')}
+   - ${format(addDays(currentWeekStartDate, 3), 'EEEE')}: ${format(addDays(currentWeekStartDate, 3), 'MMMM d')}
+   - ${format(addDays(currentWeekStartDate, 4), 'EEEE')}: ${format(addDays(currentWeekStartDate, 4), 'MMMM d')}
+   - ${format(addDays(currentWeekStartDate, 5), 'EEEE')}: ${format(addDays(currentWeekStartDate, 5), 'MMMM d')}
+   - ${format(addDays(currentWeekStartDate, 6), 'EEEE')}: ${format(addDays(currentWeekStartDate, 6), 'MMMM d')}
 2. Begin with a weekly mileage summary showing the total planned miles for the week
 3. Ensure week headers are clearly visible (e.g., "### Week ${weekNumber} ###")
 4. Include safety checks:
@@ -236,12 +252,12 @@ Example:
 Weekly Summary:
 Total Mileage: 25 miles
 
-Monday, ${format(weekStartDate, 'MMMM d')}: Recovery Day
+Monday, ${format(currentWeekStartDate, 'MMMM d')}: Recovery Day
 - Rest or light cross-training (yoga, swimming, or cycling)
 - Focus on stretching and mobility work
 - Include foam rolling and proper hydration
 
-Tuesday, ${format(addDays(weekStartDate, 1), 'MMMM d')}: Easy Run
+Tuesday, ${format(addDays(currentWeekStartDate, 1), 'MMMM d')}: Easy Run
 - 5 miles at easy pace (2 minutes slower than goal marathon pace)
 - Keep effort conversational, focus on form
 - Post-run stretching and recovery routine
@@ -282,7 +298,7 @@ End the week's plan with:
       console.log('Email sending process started...', {
         recipientEmail: state.email,
         planLength: fullPlan.length,
-        raceDate: format(raceDateObj, 'MMMM d, yyyy'),
+        raceDate: format(new Date(state.raceDate), 'MMMM d, yyyy'),
         resendApiKeySet: !!process.env.RESEND_API_KEY
       });
 
@@ -315,7 +331,7 @@ End the week's plan with:
               <h1 style="color: #2563eb;">Your Marathon Training Plan</h1>
               ${isTestMode && state.email !== allowedTestEmail ? 
                 `<p><strong>Note:</strong> This plan was requested by ${state.email}.</p>` : ''}
-              <p>Here's your personalized training plan for your marathon on ${format(raceDateObj, 'MMMM d, yyyy')}.</p>
+              <p>Here's your personalized training plan for your marathon on ${format(new Date(state.raceDate), 'MMMM d, yyyy')}.</p>
               <div style="background: #f3f4f6; padding: 20px; border-radius: 8px; white-space: pre-wrap; font-family: monospace;">
                 ${fullPlan}
               </div>
