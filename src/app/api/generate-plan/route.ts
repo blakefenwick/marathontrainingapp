@@ -174,34 +174,23 @@ export async function PUT(req: Request) {
     await redis.set(`request:${requestId}`, JSON.stringify(state), { ex: 3600 });
 
     // Calculate dates
-    const tomorrow = addDays(new Date(), 1);
+    const today = new Date();
     const raceDate = new Date(state.raceDate);
+    // Find next Monday
+    const daysUntilNextMonday = (8 - today.getDay()) % 7 || 7; // If today is Monday, go to next Monday
+    const firstMonday = addDays(today, daysUntilNextMonday);
+
     let currentWeekStartDate;
     let currentWeekEndDate;
 
-    if (weekNumber === 1) {
-      // Week 1 starts tomorrow, regardless of the day
-      currentWeekStartDate = tomorrow;
-      // Week 1 ends on the next Sunday
-      const daysUntilSunday = 7 - tomorrow.getDay();
-      currentWeekEndDate = addDays(tomorrow, daysUntilSunday - 1);
-    } else {
-      // Find the Monday after Week 1 ends
-      const week1Start = tomorrow;
-      const daysUntilSunday = 7 - week1Start.getDay();
-      const week1End = addDays(week1Start, daysUntilSunday - 1);
-      const week2Start = addDays(week1End, 1); // First Monday
-      
-      // Calculate start date for current week
-      const weeksAfterWeek2 = weekNumber - 2;
-      currentWeekStartDate = addDays(week2Start, weeksAfterWeek2 * 7);
-      currentWeekEndDate = addDays(currentWeekStartDate, 6);
-    }
+    // All weeks start on Monday and end on Sunday
+    currentWeekStartDate = addDays(firstMonday, (weekNumber - 1) * 7);
+    currentWeekEndDate = addDays(currentWeekStartDate, 6);
 
     // Log date calculations for debugging
     console.log('Date calculations:', {
-      today: new Date().toISOString(),
-      tomorrow: tomorrow.toISOString(),
+      today: today.toISOString(),
+      nextMonday: firstMonday.toISOString(),
       weekNumber,
       currentWeekStartDate: currentWeekStartDate.toISOString(),
       currentWeekEndDate: currentWeekEndDate.toISOString(),
