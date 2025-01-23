@@ -183,47 +183,60 @@ export async function PUT(req: Request) {
       throw new Error('Week is beyond race date');
     }
 
-    // Simplified prompt for faster response
-    const prompt = `Generate a detailed training plan for week ${weekNumber} of a ${state.totalWeeks}-week marathon training plan. 
-Race Date: ${state.raceDate}
-Current Weekly Mileage: ${state.currentMileage} miles
-Goal Time: ${state.goalTime.hours}h${state.goalTime.minutes}m
+    // Enhanced prompt with safety checks and improved formatting
+    const prompt = `You are a marathon training plan generator. Your task is to create a complete and detailed weekly training plan for Week ${weekNumber} of ${state.totalWeeks} total weeks.
 
-Consider the following guidelines:
-1. Current Phase (based on week number):
-   - Weeks 1-2: Rest Phase (2-3 days running, easy runs)
-   - Weeks 3-5: Mileage Build Phase (gradual increase, max 10% per week)
-   - Weeks 6-${Math.max(state.totalWeeks - 3, 6)}: Peak Training Phase (higher mileage, 1-2 workouts per week)
-   - Last 3 weeks: Taper Phase (reduce mileage 10-20% per week)
+Inputs:
+1. Race Date: ${state.raceDate}
+2. Goal Time: ${state.goalTime.hours}h${state.goalTime.minutes}m${state.goalTime.seconds}s
+3. Current Weekly Mileage: ${state.currentMileage} miles
+4. Training Phase: ${
+  weekNumber <= 2 ? 'Rest Phase - Focus on easy runs, building consistency' :
+  weekNumber <= 5 ? 'Mileage Build Phase - Gradual increase, max 10% per week' :
+  weekNumber > state.totalWeeks - 3 ? 'Taper Phase - Reducing volume while maintaining fitness' :
+  'Peak Training Phase - Higher mileage and quality workouts'
+}
 
-2. Weekly Structure:
-   - Long Run: 60-90 seconds slower than goal marathon pace
-   - Tempo Run: Near goal marathon pace
-   - Easy Runs: 2 minutes slower than goal marathon pace
-   - Recovery Runs: Very easy pace
-   - Rest or Cross-training days as needed
+Weekly Structure Guidelines:
+- Long Run: 60-90 seconds slower than goal marathon pace
+- Tempo Runs: Near goal marathon pace (85-90% effort)
+- Easy Runs: 2 minutes slower than goal marathon pace
+- Recovery Runs: Very easy pace, focus on form
+- Rest/Cross-Training: ${Number(state.currentMileage) < 20 ? '2-3' : '1-2'} days per week
 
-3. Current Fitness Level (based on weekly mileage):
-   ${Number(state.currentMileage) < 20 ? '- Beginner: Focus on building base mileage safely' :
-     Number(state.currentMileage) < 40 ? '- Intermediate: Balance mileage with quality workouts' :
-     '- Advanced: Include challenging workouts and higher mileage'}
+Current Runner Level: ${
+  Number(state.currentMileage) < 20 ? 'Beginner - Focus on building base safely, mandatory 2 rest days, limit increases to 10% per week' :
+  Number(state.currentMileage) < 40 ? 'Intermediate - Balance mileage with quality workouts, 1-2 rest days' :
+  'Advanced - Higher mileage and challenging workouts, recovery as needed'
+}
 
-Format the response with clear line breaks between days and sections. Each day should be on a new line and follow this format:
+Additional Instructions:
+1. Generate a detailed plan for Week ${weekNumber}, using actual calendar dates (race date is ${state.raceDate}).
+2. Ensure week headers are clearly visible (e.g., "### Week ${weekNumber} ###").
+3. Include safety checks:
+   - Beginners: Max 10% weekly mileage increase, 2+ rest days
+   - All levels: Progressive loading, recovery after hard efforts
+4. Add a motivational message at the end of the week's plan.
 
-[Day, Date]: [Workout Type]
+Format each day as follows:
+[Day, Actual Date]: [Workout Type]
 - Distance and pace guidance
 - Detailed workout description
 - Recovery and form tips
 
 Example:
-Monday: Recovery Day
-- Rest or light cross-training
-- Focus on stretching and mobility
+Monday, June 1: Recovery Day
+- Rest or light cross-training (yoga, swimming, or cycling)
+- Focus on stretching and mobility work
+- Include foam rolling and proper hydration
 
-Tuesday: Easy Run
+Tuesday, June 2: Easy Run
 - 5 miles at easy pace (2 minutes slower than goal marathon pace)
-- Keep effort conversational
-- Focus on maintaining good form`;
+- Keep effort conversational, focus on form
+- Post-run stretching and recovery routine
+
+End the week's plan with:
+"Week ${weekNumber} Complete! Remember to: [specific tips for this phase of training]"`;
 
     const response = await openai.chat.completions.create({
       model: 'gpt-3.5-turbo',
