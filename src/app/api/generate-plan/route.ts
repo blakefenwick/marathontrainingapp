@@ -173,31 +173,56 @@ export async function PUT(req: Request) {
     state.currentWeek = weekNumber;
     await redis.set(`request:${requestId}`, JSON.stringify(state), { ex: 3600 });
 
-    // Calculate start date (tomorrow) and week dates
+    // Calculate dates
     const tomorrow = addDays(new Date(), 1);
-    const planStartDate = tomorrow;
-    const weekStartOffset = (weekNumber - 1) * 7;
-    const currentWeekStartDate = addDays(planStartDate, weekStartOffset);
+    const raceDate = new Date(state.raceDate);
+    let currentWeekStartDate;
+    let currentWeekEndDate;
+
+    if (weekNumber === 1) {
+      // Week 1 starts tomorrow, regardless of the day
+      currentWeekStartDate = tomorrow;
+      // Week 1 ends on the next Sunday
+      const daysUntilSunday = 7 - tomorrow.getDay();
+      currentWeekEndDate = addDays(tomorrow, daysUntilSunday - 1);
+    } else {
+      // Find the Monday after Week 1 ends
+      const week1Start = tomorrow;
+      const daysUntilSunday = 7 - week1Start.getDay();
+      const week1End = addDays(week1Start, daysUntilSunday - 1);
+      const week2Start = addDays(week1End, 1); // First Monday
+      
+      // Calculate start date for current week
+      const weeksAfterWeek2 = weekNumber - 2;
+      currentWeekStartDate = addDays(week2Start, weeksAfterWeek2 * 7);
+      currentWeekEndDate = addDays(currentWeekStartDate, 6);
+    }
 
     // Log date calculations for debugging
     console.log('Date calculations:', {
       today: new Date().toISOString(),
       tomorrow: tomorrow.toISOString(),
-      planStartDate: planStartDate.toISOString(),
       weekNumber,
-      weekStartOffset,
-      currentWeekStartDate: currentWeekStartDate.toISOString()
+      currentWeekStartDate: currentWeekStartDate.toISOString(),
+      currentWeekEndDate: currentWeekEndDate.toISOString(),
+      raceDate: raceDate.toISOString()
     });
 
-    if (currentWeekStartDate >= new Date(state.raceDate)) {
-      throw new Error('Week is beyond race date');
+    // Validate dates
+    if (currentWeekStartDate > raceDate) {
+      throw new Error('Week starts after race date');
+    }
+
+    // For the last week, adjust the end date to match race date if needed
+    if (weekNumber === state.totalWeeks && currentWeekEndDate.getTime() !== raceDate.getTime()) {
+      currentWeekEndDate = raceDate;
     }
 
     // Enhanced prompt with date continuity
     const prompt = `You are a marathon training plan generator. Your task is to create a complete and detailed weekly training plan for Week ${weekNumber} of ${state.totalWeeks} total weeks.
 
 Inputs:
-1. Race Date: ${state.raceDate}
+1. Race Date: ${format(raceDate, 'MMMM d, yyyy')}
 2. Goal Time: ${state.goalTime.hours}h${state.goalTime.minutes}m${state.goalTime.seconds}s
 3. Current Weekly Mileage: ${state.currentMileage} miles
 4. Training Phase: ${
@@ -221,20 +246,18 @@ Current Runner Level: ${
 }
 
 Additional Instructions:
-1. Generate a detailed plan for Week ${weekNumber}, starting from ${format(currentWeekStartDate, 'EEEE, MMMM d')}. Use these exact dates:
-   - ${format(currentWeekStartDate, 'EEEE')}: ${format(currentWeekStartDate, 'MMMM d')}
-   - ${format(addDays(currentWeekStartDate, 1), 'EEEE')}: ${format(addDays(currentWeekStartDate, 1), 'MMMM d')}
-   - ${format(addDays(currentWeekStartDate, 2), 'EEEE')}: ${format(addDays(currentWeekStartDate, 2), 'MMMM d')}
-   - ${format(addDays(currentWeekStartDate, 3), 'EEEE')}: ${format(addDays(currentWeekStartDate, 3), 'MMMM d')}
-   - ${format(addDays(currentWeekStartDate, 4), 'EEEE')}: ${format(addDays(currentWeekStartDate, 4), 'MMMM d')}
-   - ${format(addDays(currentWeekStartDate, 5), 'EEEE')}: ${format(addDays(currentWeekStartDate, 5), 'MMMM d')}
-   - ${format(addDays(currentWeekStartDate, 6), 'EEEE')}: ${format(addDays(currentWeekStartDate, 6), 'MMMM d')}
+1. Generate a detailed plan for Week ${weekNumber}${weekNumber === 1 ? ' (Partial week starting tomorrow)' : ''}, using these exact dates:
+   ${Array.from({ length: Math.ceil((currentWeekEndDate.getTime() - currentWeekStartDate.getTime()) / (1000 * 60 * 60 * 24)) + 1 }).map((_, index) => {
+     const date = addDays(currentWeekStartDate, index);
+     return `\n   - ${format(date, 'EEEE')}: ${format(date, 'MMMM d')}${date.getTime() === raceDate.getTime() ? ' (Race Day!)' : ''}`;
+   }).join('')}
+
 2. Begin with a weekly mileage summary showing the total planned miles for the week
 3. Ensure week headers are clearly visible (e.g., "### Week ${weekNumber} ###")
 4. Include safety checks:
    - Beginners: Max 10% weekly mileage increase, 2+ rest days
    - All levels: Progressive loading, recovery after hard efforts
-5. Add a motivational message at the end of the week's plan
+5. Add a motivational message at the end of the week's plan${weekNumber === state.totalWeeks ? '\n6. End the plan with race day instructions and final preparation tips' : ''}
 
 Format the plan as follows:
 
@@ -249,21 +272,13 @@ Total Mileage: [Sum of all running miles for the week]
 - Recovery and form tips
 
 Example:
-Weekly Summary:
-Total Mileage: 25 miles
-
-Monday, ${format(currentWeekStartDate, 'MMMM d')}: Recovery Day
+${format(currentWeekStartDate, 'EEEE, MMMM d')}: Recovery Day
 - Rest or light cross-training (yoga, swimming, or cycling)
 - Focus on stretching and mobility work
 - Include foam rolling and proper hydration
 
-Tuesday, ${format(addDays(currentWeekStartDate, 1), 'MMMM d')}: Easy Run
-- 5 miles at easy pace (2 minutes slower than goal marathon pace)
-- Keep effort conversational, focus on form
-- Post-run stretching and recovery routine
-
 End the week's plan with:
-"Week ${weekNumber} Complete! Remember to: [specific tips for this phase of training]"`;
+"Week ${weekNumber} Complete! Remember to: [specific tips for this phase of training]"${weekNumber === state.totalWeeks ? '\nRace Day Tips: [Include specific race day preparation and strategy tips]' : ''}`;
 
     const response = await openai.chat.completions.create({
       model: 'gpt-3.5-turbo',
