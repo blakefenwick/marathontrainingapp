@@ -175,15 +175,14 @@ export async function PUT(req: Request) {
 
     const raceDateObj = new Date(state.raceDate);
     const today = new Date();
-    const startDate = addDays(today, (weekNumber - 1) * 7);
-    const endDate = addDays(startDate, 6);
-    const lastTrainingDay = endDate > raceDateObj ? raceDateObj : endDate;
+    const weeksUntilRace = state.totalWeeks - weekNumber + 1;
+    const weekStartDate = addDays(raceDateObj, -7 * weeksUntilRace);
 
-    if (startDate >= raceDateObj) {
+    if (weekStartDate >= raceDateObj) {
       throw new Error('Week is beyond race date');
     }
 
-    // Enhanced prompt with safety checks and improved formatting
+    // Enhanced prompt with date continuity and mileage summary
     const prompt = `You are a marathon training plan generator. Your task is to create a complete and detailed weekly training plan for Week ${weekNumber} of ${state.totalWeeks} total weeks.
 
 Inputs:
@@ -211,26 +210,38 @@ Current Runner Level: ${
 }
 
 Additional Instructions:
-1. Generate a detailed plan for Week ${weekNumber}, using actual calendar dates (race date is ${state.raceDate}).
-2. Ensure week headers are clearly visible (e.g., "### Week ${weekNumber} ###").
-3. Include safety checks:
+1. Generate a detailed plan for Week ${weekNumber}, using the following dates:
+   - Week starts on: ${format(weekStartDate, 'EEEE, MMMM d')}
+   - Each subsequent day should follow in sequence
+2. Begin with a weekly mileage summary showing the total planned miles for the week
+3. Ensure week headers are clearly visible (e.g., "### Week ${weekNumber} ###")
+4. Include safety checks:
    - Beginners: Max 10% weekly mileage increase, 2+ rest days
    - All levels: Progressive loading, recovery after hard efforts
-4. Add a motivational message at the end of the week's plan.
+5. Add a motivational message at the end of the week's plan
 
-Format each day as follows:
-[Day, Actual Date]: [Workout Type]
+Format the plan as follows:
+
+### Week ${weekNumber} ###
+
+Weekly Summary:
+Total Mileage: [Sum of all running miles for the week]
+
+[Day, Date]: [Workout Type]
 - Distance and pace guidance
 - Detailed workout description
 - Recovery and form tips
 
 Example:
-Monday, June 1: Recovery Day
+Weekly Summary:
+Total Mileage: 25 miles
+
+Monday, ${format(weekStartDate, 'MMMM d')}: Recovery Day
 - Rest or light cross-training (yoga, swimming, or cycling)
 - Focus on stretching and mobility work
 - Include foam rolling and proper hydration
 
-Tuesday, June 2: Easy Run
+Tuesday, ${format(addDays(weekStartDate, 1), 'MMMM d')}: Easy Run
 - 5 miles at easy pace (2 minutes slower than goal marathon pace)
 - Keep effort conversational, focus on form
 - Post-run stretching and recovery routine
