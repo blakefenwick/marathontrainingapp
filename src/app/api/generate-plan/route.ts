@@ -183,9 +183,11 @@ export async function PUT(req: Request) {
     let currentWeekStartDate;
     let currentWeekEndDate;
 
-    // All weeks start on Monday and end on Sunday
+    // All weeks start on Monday, but final week ends on race day
     currentWeekStartDate = addDays(firstMonday, (weekNumber - 1) * 7);
-    currentWeekEndDate = addDays(currentWeekStartDate, 6);
+    currentWeekEndDate = weekNumber === state.totalWeeks ? 
+      raceDate : // Final week ends on race day
+      addDays(currentWeekStartDate, 6); // Other weeks end on Sunday
 
     // Log date calculations for debugging
     console.log('Date calculations:', {
@@ -194,7 +196,8 @@ export async function PUT(req: Request) {
       weekNumber,
       currentWeekStartDate: currentWeekStartDate.toISOString(),
       currentWeekEndDate: currentWeekEndDate.toISOString(),
-      raceDate: raceDate.toISOString()
+      raceDate: raceDate.toISOString(),
+      isFinalWeek: weekNumber === state.totalWeeks
     });
 
     // Validate dates
